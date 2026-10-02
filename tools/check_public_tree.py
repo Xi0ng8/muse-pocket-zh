@@ -61,13 +61,24 @@ def main():
 
     # Scan every reachable version of each blob, not just the latest commit.
     entries = git("rev-list", "--objects", "--all").decode().splitlines()
+    objects = [entry.split(" ", 1) for entry in entries if " " in entry]
     history_count = 0
-    for entry in entries:
-        oid, _, path = entry.partition(" ")
-        if not path or git("cat-file", "-t", oid).strip() != b"blob":
-            continue
-        history_count += 1
-        problems.extend(inspect(path, git("cat-file", "blob", oid), "history"))
+    if objects:
+        # One Git process avoids starting hundreds of processes on large trees.
+        batch = subprocess.run(
+            ["git", "cat-file", "--batch"], cwd=ROOT,
+            input="".join(oid + "\n" for oid, _ in objects).encode(),
+            capture_output=True, check=True).stdout
+        cursor = 0
+        for _, path in objects:
+            end = batch.index(b"\n", cursor)
+            _, kind, size = batch[cursor:end].split()
+            start = end + 1
+            cursor = start + int(size) + 1
+            if kind != b"blob":
+                continue
+            history_count += 1
+            problems.extend(inspect(path, batch[start:cursor - 1], "history"))
     if problems:
         for problem in sorted(set(problems)):
             print(problem, file=sys.stderr)
