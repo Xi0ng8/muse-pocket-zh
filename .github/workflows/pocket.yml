@@ -1,0 +1,38 @@
+name: Muse Pocket
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Public tree and history
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 tools/check_public_tree.py
+      - name: Focused tests
+        run: python3 -m unittest discover -s esp32/tools/pocket -p 'test_*.py' -v
+      - name: Build X4 Pro without credentials
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          esp32/tools/pocket/build.sh
+      - name: SDK host tests
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config
+          source "$IDF_PATH/export.sh"
+          cd esp32
+          python -m unittest discover -s tests -p 'test_*.py' -v

@@ -1,0 +1,32 @@
+Muse Pocket
+
+Contains a modified ESP32 source snapshot of Muse Gadget SDK:
+https://github.com/facebookincubator/muse-gadget-sdk
+Upstream commit: 7e7123e2815d3e7e3c0f2ca330f576290ae6a6a9
+Copyright (c) Meta Platforms, Inc. and affiliates.
+Licensed under the Apache License, Version 2.0; see LICENSE.
+
+Muse Pocket changes add X4 Pro display/controls, preserved-image recovery,
+local private token packaging, generic companion initialization and public docs.
+Modified inherited source files carry a Muse Pocket modification notice.
+New Muse Pocket source, docs and neutral placeholder art use Apache-2.0.
+The upstream license-excluded Jollybot art is omitted and replaced with original
+neutral display icons. The retained SDK's other board profiles are not qualified
+as Muse Pocket products.
+
+esp32/components/xteink_epd contains a pinned MIT subset of FreeInk:
+https://github.com/Free-Ink/freeink-sdk
+Commit: 6af90c4c50b4e067516bb4c344bb686a26f1da52
+See that directory's LICENSE and UPSTREAM.md for attribution and modifications.
+
+esp32/main/pixel_font.c retains the Adafruit BSD-2-Clause notice in its header.
+esp32/components/minimp3/include/minimp3.h retains CC0-1.0; see its LICENSE.
+Dependencies fetched by ESP-IDF keep their own licenses.
+
+esp32/dev_signing_key.pem is the deliberately public SDK DEVELOPMENT test key,
+unchanged from the upstream snapshot (SHA256 e57311281ea0478a80be57036768ef71481804eab73182b2b70255311a2ded6a).
+It is not a user's secret or a production signing identity. Do not use it to
+secure hardware. Muse Pocket's X4 Pro profile does not enable secure boot.
+
+Muse service access and pairing are also subject to the Gadget SDK Terms:
+https://gadgets.muse.ai/sdk-terms

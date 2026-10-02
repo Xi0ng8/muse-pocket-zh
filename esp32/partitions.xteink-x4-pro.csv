@@ -1,0 +1,9 @@
+# X4 Pro OEM dual app layout; OTA uses the ACTUAL device table.
+# Never flash this CSV/table or any bootloader on the cable-free reader.
+# Name, Type, SubType, Offset, Size
+nvs, data, nvs, 0x9000, 0x5000
+otadata, data, ota, 0xe000, 0x2000
+app0, app, ota_0, 0x10000, 0x7e0000
+app1, app, ota_1, 0x7f0000, 0x7e0000
+spiffs, data, spiffs, 0xfd0000, 0x14000
+coredump, data, coredump, 0xfe4000, 0x1c000

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Muse Pocket"
+  short_description: "Build and maintain the X4 Pro Muse companion"
+  default_prompt: "Use $muse-pocket to build or troubleshoot the X4 Pro companion firmware."

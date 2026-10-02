@@ -1,0 +1,37 @@
+# Only reviewed public SDK fixtures are excluded; actual Muse tokens are not.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deliberately public SDK development key; SHA256 pinned by check_public_tree.py"
+targetRules = ["private-key"]
+paths = ['^esp32/dev_signing_key\.pem$']
+
+[[allowlists]]
+description = "RFC WebSocket sample nonce in inherited upgrade request templates"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['^esp32/main/noise_upgrade\.h$', '^esp32/components/muse/muse_chat_session\.cpp$']
+regexTarget = "match"
+regexes = ['Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==']
+
+[[allowlists]]
+description = "Exact public pairing test vectors derived from the documented small test scalars"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['^esp32/tests/vectors/link_pairing_v5\.json$']
+regexTarget = "line"
+regexes = [
+  '''"ecdh_secret_hex": "7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978"''',
+  '''"session_secret_hex": "765930feefbf68342aad90474f513ae108ad4b2764c0e10e94ff492b7790a474"''',
+  '''"mobile_tx_key_hex": "ffe58d50a78cec08b78e220128da2f80913d66f865f24c14a4b21c00e2a96152"''',
+  '''"mobile_rx_key_hex": "2208c6d80caa35cd71a5d89ae5f1bf0856e01def5a5e23c82aba926847631e0c"''',
+  '''"ecdh_secret_hex": "7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978"''',
+  '''"session_secret_hex": "8479a24ffacec8df9dfdb7284bc686f8e73f791788967f058bb949df1d99b973"''',
+  '''"mobile_tx_key_hex": "6bc3604a4762aa48c090784389446bcfecb5d9cea61ed392243326e77c9a34ff"''',
+  '''"mobile_rx_key_hex": "28a230867831e8a154e116e542da131db1b9cdfbe2783ea9916a4b7f331c3bfb"''',
+  '''"ecdh_secret_hex": "7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978"''',
+  '''"session_secret_hex": "560fa31813e6869852d75de6797b5a3221c2cfb5fddfefb87ceb7842d553e987"''',
+  '''"mobile_tx_key_hex": "ee25e7f1eb3c05cc8465634e5f634deed858862b1c4c35fa434dc926f7facaeb"''',
+  '''"mobile_rx_key_hex": "9abb2954b05e2f5f7112e9bfd41fd970602e27ed07453c1cff51f575de5d0b4e"''',
+]
