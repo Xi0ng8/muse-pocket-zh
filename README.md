@@ -1,5 +1,7 @@
 # Muse Pocket
 
+![Muse Pocket displaying a Muse character and status, handheld and attached to an orange iPhone](docs/images/muse-pocket-hero.jpg)
+
 Turn an **Xteink X4 Pro** e-reader into a small e-paper companion for your Muse.
 It shows your Muse's character, name and short status updates, with settings for
 brightness, warmth, refresh speed, orientation and sleep.
@@ -44,6 +46,18 @@ After pairing, the reader sends your Muse one message asking it to display its
 character and keep the caption current. Muse supplies these updates by calling
 the gadget's commands; the firmware does not independently know what Muse is
 doing. The original neutral display icon stays visible until an image arrives.
+
+## Pairing and sending updates
+
+Pairing in the Muse app confirms access to your Muse and lets you choose a Wi-Fi
+network. After connecting, ask your Muse to draw its character and update the
+status caption. The [command guide](docs/usage.md) explains the image and text
+commands, including what to ask if the first update is missing.
+
+The screenshots below show the access confirmation, Wi-Fi selection and a chat
+request to send a character and status to the display.
+
+![Muse app screenshots showing access confirmation, Wi-Fi selection and a request to update the Muse Pocket character and status](docs/images/muse-pocket-pairing-and-updates.jpg)
 
 ## Buttons
 
