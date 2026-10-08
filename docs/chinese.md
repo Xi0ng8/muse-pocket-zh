@@ -25,8 +25,10 @@
 
 本机 7 项 Pocket 测试（文本 harness 使用 ASan/UBSan）、3 项字库测试、ESP-IDF 6.0.1 X4Pro 构建通过。实际渲染代码的主屏和菜单电脑预览已检查。GitHub 的公开源码/历史检查、Pocket 测试、字库检查、固件构建与 SDK host 测试均通过：[CI 记录](https://github.com/Xi0ng8/muse-pocket-zh/actions/runs/37813193653)。
 
-旧版 Muse Pocket 返回 CrossPoint 1.6.5 的路径已由设备 API 确认。**中文版本的恢复往返、语言重启持久化、长时间重连/休眠行为和其他面板批次尚未单独验证。** 构建、电脑预览与一台设备的显示结果不能保证其他设备的行为。
+旧版 Muse Pocket 返回 CrossPoint 1.6.5 的路径已由设备 API 确认。**`0.1.4-zh` 中文版本的恢复往返、语言重启持久化、长时间重连/休眠行为和其他面板批次尚未单独验证。** 构建、电脑预览与一台设备的显示结果不能保证其他设备的行为。
+
+`0.1.5-coexist-zh` 双系统版本：同日用户确认专用 CrossMux 启动与 CrossMux ↔ 中文 Muse 双向切换正常。**该版本的 Muse 配对同步、中文阅读与换字体后的实际 Flash 槽摘要尚未单独确认。** 旧版中文显示确认不能替代新版验证；实机范围和发布清单见 [共存说明](crossmux-coexistence.md#验证范围)。
 
 ## 安装边界
 
-保留应用更新流程、个人打包流程、原 token 保留槽、配对存储与准确 CrossPoint 1.6.5 恢复摘要。此次不添加远程 OTA。公开发布只能包含无凭据应用镜像，每个用户必须在本机打包自己的 token。
+保留应用更新流程、个人打包流程、原 token 保留槽、配对存储与准确 CrossPoint 1.6.5 摘要。双系统版本额外固定配套 CrossMux 完整镜像摘要，最终不再有 CrossPoint 槽；不添加远程 OTA。公开发布只能包含无凭据应用镜像，每个用户必须在本机打包自己的 token。共存版公开 Muse 模板已经签署，个人打包不影响配套证书验证，见 [安装步骤](crossmux-coexistence.md#安装步骤)。

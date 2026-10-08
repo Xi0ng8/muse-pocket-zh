@@ -1,0 +1,1268 @@
+diff --git a/lib/I18n/translations/chinese.yaml b/lib/I18n/translations/chinese.yaml
+index 62357ee..e1aefb3 100644
+--- a/lib/I18n/translations/chinese.yaml
++++ b/lib/I18n/translations/chinese.yaml
+@@ -1,4 +1,6 @@
+ _language_name: "简体中文"
++STR_SWITCH_TO_MUSE: "切换到中文 Muse"
++STR_MUSE_SWITCH_FAILED: "无法切换：Muse 固件未通过安全验证"
+ _language_code: "ZH_CN"
+ _order: "23"
+ _bcp47: "zh-CN"
+diff --git a/lib/I18n/translations/english.yaml b/lib/I18n/translations/english.yaml
+index aebd121..fcb2f83 100644
+--- a/lib/I18n/translations/english.yaml
++++ b/lib/I18n/translations/english.yaml
+@@ -1,4 +1,6 @@
+ _language_name: "English"
++STR_SWITCH_TO_MUSE: "Switch to Chinese Muse"
++STR_MUSE_SWITCH_FAILED: "Cannot switch: Muse firmware failed security verification"
+ _language_code: "EN"
+ _order: "0"
+ _bcp47: "en"
+diff --git a/lib/hal/HalMuseCoexist.cpp b/lib/hal/HalMuseCoexist.cpp
+new file mode 100644
+index 0000000..02a5bf1
+--- /dev/null
++++ b/lib/hal/HalMuseCoexist.cpp
+@@ -0,0 +1,331 @@
++#include "HalMuseCoexist.h"
++
++#if CROSSMUX_MUSE_COEXIST
++#include <HalStorage.h>
++#include <Logging.h>
++#include <MuseCoexistPublicKey.h>
++#include <esp_flash.h>
++#include <esp_image_format.h>
++#include <esp_ota_ops.h>
++#include <esp_system.h>
++#include <mbedtls/pk.h>
++#include <mbedtls/sha256.h>
++
++#include <algorithm>
++#include <cstring>
++
++namespace {
++constexpr size_t CERT_SIZE = 384, PAYLOAD_SIZE = 184, TOKEN_SIZE = 128, CHUNK = 2048;
++constexpr char CERT_MARKER[] = "MUSE_POCKET_COEXIST_CERT_V1";
++constexpr char TOKEN_MARKER[] = "MUSE_POCKET_TOKEN_SLOT_V1";
++struct Geometry {
++  uint32_t size, checksum, digest;
++  uint32_t start[16], end[16];
++  uint8_t segments;
++};
++struct Source {
++  const esp_partition_t* partition;
++  HalFile* file;
++  size_t size;
++};
++uint32_t u32(const uint8_t* p) {
++  return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
++}
++bool reject(std::string& error, const char* reason) {
++  error = reason;
++  return false;
++}
++bool read(const Source& source, size_t offset, void* data, size_t length) {
++  if (offset > source.size || length > source.size - offset) return false;
++  if (source.partition) return esp_partition_read(source.partition, offset, data, length) == ESP_OK;
++  return source.file && source.file->seekSet(offset) && source.file->read(data, length) == static_cast<int>(length);
++}
++bool fixed(const uint8_t* data, size_t size, const char* expected) {
++  const size_t n = std::strlen(expected);
++  if (n >= size || std::memcmp(data, expected, n)) return false;
++  for (size_t i = n; i < size; ++i)
++    if (data[i]) return false;
++  return true;
++}
++bool padded(const uint8_t* data, size_t size) {
++  size_t end = 0;
++  while (end < size && data[end]) ++end;
++  if (!end || end == size) return false;
++  for (size_t i = end; i < size; ++i)
++    if (data[i]) return false;
++  return true;
++}
++bool geometry(const Source& part, Geometry& g) {
++  uint8_t h[24];
++  if (!read(part, 0, h, sizeof(h)) || h[0] != 0xe9 || h[1] < 1 || h[1] > 16 || h[23] != 1 || h[12] != 9 || h[13] != 0)
++    return false;
++  g.segments = h[1];
++  uint32_t pos = 24;
++  for (unsigned i = 0; i < g.segments; ++i) {
++    uint8_t segment[8];
++    if (!read(part, pos, segment, 8)) return false;
++    pos += 8;
++    uint32_t n = u32(segment + 4);
++    if (pos > part.size || n > part.size - pos) return false;
++    g.start[i] = pos;
++    g.end[i] = pos + n;
++    pos += n;
++  }
++  if (pos > UINT32_MAX - 48) return false;
++  g.checksum = pos + (15 - pos % 16);
++  g.digest = g.checksum + 1;
++  g.size = g.digest + 32;
++  return g.size <= part.size;
++}
++bool contained(const Geometry& g, uint32_t offset, size_t size) {
++  for (unsigned i = 0; i < g.segments; ++i)
++    if (offset >= g.start[i] && offset <= g.end[i] && size <= g.end[i] - offset) return true;
++  return false;
++}
++bool intact(const Source& part, const Geometry& g) {
++  uint8_t buffer[CHUNK], actual[32], stored[32];
++  uint8_t checksum = 0xef;
++  mbedtls_sha256_context sha;
++  mbedtls_sha256_init(&sha);
++  bool ok = mbedtls_sha256_starts(&sha, 0) == 0;
++  for (uint32_t pos = 0; ok && pos < g.digest;) {
++    size_t n = std::min<size_t>(CHUNK, g.digest - pos);
++    ok = read(part, pos, buffer, n) && mbedtls_sha256_update(&sha, buffer, n) == 0;
++    for (size_t j = 0; ok && j < n; ++j)
++      for (unsigned i = 0; i < g.segments; ++i)
++        if (pos + j >= g.start[i] && pos + j < g.end[i]) {
++          checksum ^= buffer[j];
++          break;
++        }
++    pos += n;
++  }
++  uint8_t recorded = 0;
++  ok = ok && mbedtls_sha256_finish(&sha, actual) == 0 && read(part, g.digest, stored, 32) &&
++       read(part, g.checksum, &recorded, 1) && checksum == recorded && !std::memcmp(actual, stored, 32);
++  mbedtls_sha256_free(&sha);
++  return ok;
++}
++bool hash(const Source& part, const Geometry& g, uint8_t output[32], uint32_t token = UINT32_MAX,
++          uint32_t cert = UINT32_MAX) {
++  uint8_t buffer[CHUNK];
++  mbedtls_sha256_context sha;
++  mbedtls_sha256_init(&sha);
++  bool ok = mbedtls_sha256_starts(&sha, 0) == 0;
++  for (uint32_t pos = 0; ok && pos < g.size;) {
++    size_t n = std::min<size_t>(CHUNK, g.size - pos);
++    ok = read(part, pos, buffer, n);
++    if (token != UINT32_MAX)
++      for (size_t j = 0; j < n; ++j) {
++        const uint32_t offset = pos + j;
++        if (offset >= token && offset - token < TOKEN_SIZE) {
++          size_t k = offset - token;
++          buffer[j] = k < sizeof(TOKEN_MARKER) - 1 ? TOKEN_MARKER[k] : 0;
++        } else if (offset >= cert && offset - cert < CERT_SIZE) {
++          size_t k = offset - cert;
++          buffer[j] = k < sizeof(CERT_MARKER) - 1 ? CERT_MARKER[k] : 0;
++        } else if (offset == g.checksum || offset >= g.digest)
++          buffer[j] = 0;
++      }
++    ok = ok && mbedtls_sha256_update(&sha, buffer, n) == 0;
++    pos += n;
++  }
++  ok = ok && mbedtls_sha256_finish(&sha, output) == 0;
++  mbedtls_sha256_free(&sha);
++  return ok;
++}
++bool findCertificate(const Source& part, const Geometry& g, uint32_t& offset) {
++  uint8_t marker[32] = {};
++  std::memcpy(marker, CERT_MARKER, sizeof(CERT_MARKER) - 1);
++  uint8_t buffer[CHUNK + 31];
++  size_t carry = 0;
++  unsigned matches = 0;
++  for (uint32_t pos = 0; pos < g.size;) {
++    size_t n = std::min<size_t>(CHUNK, g.size - pos);
++    if (!read(part, pos, buffer + carry, n)) return false;
++    for (size_t j = 0; j + 32 <= carry + n; ++j)
++      if (!std::memcmp(buffer + j, marker, 32)) {
++        offset = pos - carry + j;
++        ++matches;
++      }
++    size_t total = carry + n;
++    carry = std::min<size_t>(31, total);
++    std::memmove(buffer, buffer + total - carry, carry);
++    pos += n;
++  }
++  return matches == 1 && contained(g, offset, CERT_SIZE);
++}
++bool canonicalToken(const uint8_t token[TOKEN_SIZE]) {
++  if (std::memcmp(token, "mgst_", 5)) return false;
++  for (size_t i = 5; i < 48; ++i) {
++    char c = token[i];
++    if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
++      return false;
++  }
++  if (!token[47] || !std::strchr("AEIMQUYcgkosw048", token[47])) return false;
++  for (size_t i = 48; i < TOKEN_SIZE; ++i)
++    if (token[i]) return false;
++  return true;
++}
++bool signature(const uint8_t cert[CERT_SIZE]) {
++  const size_t length = cert[216] | size_t(cert[217]) << 8;
++  if (!length || length > 80) return false;
++  for (size_t i = 218 + length; i < CERT_SIZE; ++i)
++    if (cert[i]) return false;
++  // P-256 signatures use a short-form DER sequence with exactly two positive,
++  // minimally encoded integers. Reject trailing bytes and ambiguous encodings.
++  const uint8_t* der = cert + 218;
++  if (length < 8 || length > 72 || der[0] != 0x30 || der[1] != length - 2) return false;
++  size_t pos = 2;
++  for (int integer = 0; integer < 2; ++integer) {
++    if (pos + 2 > length || der[pos++] != 2) return false;
++    size_t n = der[pos++];
++    if (!n || n > 33 || n > length - pos || (der[pos] & 0x80) || (n > 1 && der[pos] == 0 && !(der[pos + 1] & 0x80)) ||
++        (n == 33 && der[pos] != 0))
++      return false;
++    pos += n;
++  }
++  if (pos != length) return false;
++  uint8_t digest[32];
++  mbedtls_sha256_context sha;
++  mbedtls_sha256_init(&sha);
++  bool ok = mbedtls_sha256_starts(&sha, 0) == 0 && mbedtls_sha256_update(&sha, cert + 32, PAYLOAD_SIZE) == 0 &&
++            mbedtls_sha256_finish(&sha, digest) == 0;
++  mbedtls_sha256_free(&sha);
++  mbedtls_pk_context key;
++  mbedtls_pk_init(&key);
++  ok = ok &&
++       mbedtls_pk_parse_public_key(&key, reinterpret_cast<const unsigned char*>(kMuseCoexistPublicKeyPem),
++                                   sizeof(kMuseCoexistPublicKeyPem)) == 0 &&
++       mbedtls_pk_verify(&key, MBEDTLS_MD_SHA256, digest, sizeof(digest), cert + 218, length) == 0;
++  mbedtls_pk_free(&key);
++  return ok;
++}
++
++bool layout(const esp_partition_t* part, const esp_partition_t* running) {
++  uint32_t flashSize = 0;
++  if (esp_flash_get_size(nullptr, &flashSize) != ESP_OK) return false;
++  const auto valid = [flashSize](const esp_partition_t* p) {
++    return p && p->type == ESP_PARTITION_TYPE_APP && p->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_MIN &&
++           p->subtype <= ESP_PARTITION_SUBTYPE_APP_OTA_MAX && p->address >= 0x10000 && p->address % 0x10000 == 0 &&
++           p->size && p->size % 4096 == 0 && p->address <= flashSize && p->size <= flashSize - p->address;
++  };
++  const esp_partition_t* nvs =
++      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, nullptr);
++  if (!valid(part) || !valid(running) || !nvs || part->subtype == running->subtype ||
++      !(part->address + part->size <= running->address || running->address + running->size <= part->address))
++    return false;
++  if (nvs->address > flashSize || nvs->size > flashSize - nvs->address ||
++      !(nvs->address + nvs->size <= part->address || part->address + part->size <= nvs->address) ||
++      !(nvs->address + nvs->size <= running->address || running->address + running->size <= nvs->address))
++    return false;
++  LOG_INF("MUSE", "running=%s @0x%x size=0x%x peer=%s @0x%x size=0x%x NVS @0x%x size=0x%x", running->label,
++          static_cast<unsigned>(running->address), static_cast<unsigned>(running->size), part->label,
++          static_cast<unsigned>(part->address), static_cast<unsigned>(part->size), static_cast<unsigned>(nvs->address),
++          static_cast<unsigned>(nvs->size));
++  return true;
++}
++bool verify(const Source& source, const esp_partition_t* running, std::string& error) {
++  Geometry g{};
++  uint32_t offset = 0;
++  if (!geometry(source, g) || (source.file && g.size != source.size) || !intact(source, g) ||
++      !findCertificate(source, g, offset))
++    return reject(error, "image");
++  uint8_t cert[CERT_SIZE];
++  if (!read(source, offset, cert, sizeof(cert))) return reject(error, "read");
++  const uint8_t* p = cert + 32;
++  if (std::memcmp(p, "MPXCERT1", 8) || u32(p + 8) != 1 || u32(p + 12) != g.size || u32(p + 20) != offset ||
++      u32(p + 24) != g.checksum || u32(p + 28) != g.digest || u32(p + 32) != 9 || !fixed(p + 36, 32, "muse-gadget") ||
++      !padded(p + 68, 32) || !fixed(p + 100, 16, "xteink_x4_pro") || !signature(cert))
++    return reject(error, "certificate");
++  uint32_t tokenOffset = u32(p + 16);
++  if (!contained(g, tokenOffset, TOKEN_SIZE) ||
++      !(tokenOffset + TOKEN_SIZE <= offset || offset + CERT_SIZE <= tokenOffset))
++    return reject(error, "ranges");
++  const uint32_t descriptorEnd = g.start[0] + sizeof(esp_app_desc_t);
++  if ((tokenOffset < descriptorEnd && tokenOffset + TOKEN_SIZE > g.start[0]) ||
++      (offset < descriptorEnd && offset + CERT_SIZE > g.start[0]))
++    return reject(error, "descriptor_ranges");
++  uint8_t token[TOKEN_SIZE], digest[32];
++  if (!read(source, tokenOffset, token, sizeof(token)) || !canonicalToken(token)) return reject(error, "token");
++  esp_app_desc_t description{};
++  if (g.end[0] - g.start[0] < sizeof(description) || !read(source, g.start[0], &description, sizeof(description)) ||
++      description.magic_word != ESP_APP_DESC_MAGIC_WORD || std::memcmp(description.project_name, p + 36, 32) ||
++      std::memcmp(description.version, p + 68, 32))
++    return reject(error, "descriptor");
++  if (!hash(source, g, digest, tokenOffset, offset) || std::memcmp(digest, p + 116, 32))
++    return reject(error, "identity");
++  Source peerSource{running, nullptr, running->size};
++  Geometry peer{};
++  if (!geometry(peerSource, peer) || peer.size != u32(p + 180) || !intact(peerSource, peer) ||
++      !hash(peerSource, peer, digest) || std::memcmp(digest, p + 148, 32))
++    return reject(error, "peer");
++  return true;
++}
++}  // namespace
++#endif
++
++bool HalMuseCoexist::verifyPartition(const esp_partition_t* part, std::string& error) {
++  error.clear();
++#if CROSSMUX_MUSE_COEXIST
++  const esp_partition_t* running = esp_ota_get_running_partition();
++  if (!layout(part, running)) return reject(error, "layout");
++  Source source{part, nullptr, part->size};
++  if (!verify(source, running, error)) return false;
++  Geometry g{};
++  if (!geometry(source, g)) return reject(error, "image");
++  esp_partition_pos_t location = {part->address, part->size};
++  esp_image_metadata_t metadata{};
++  if (esp_image_verify(ESP_IMAGE_VERIFY, &location, &metadata) != ESP_OK || metadata.image_len != g.size)
++    return reject(error, "sdk_verify");
++  return true;
++#else
++  (void)part;
++  error = "disabled";
++  return false;
++#endif
++}
++
++bool HalMuseCoexist::verifyFile(const char* path, std::string& error) {
++  error.clear();
++#if CROSSMUX_MUSE_COEXIST
++  HalFile file;
++  if (!path || !Storage.openFileForRead("MUSE", path, file) || !file) return reject(error, "open");
++  return verifyOpenFile(file, error);
++#else
++  (void)path;
++  error = "disabled";
++  return false;
++#endif
++}
++
++bool HalMuseCoexist::verifyOpenFile(HalFile& file, std::string& error) {
++  error.clear();
++#if CROSSMUX_MUSE_COEXIST
++  const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
++  const esp_partition_t* running = esp_ota_get_running_partition();
++  if (!layout(part, running)) return reject(error, "layout");
++  if (!file) return reject(error, "open");
++  Source source{nullptr, &file, file.fileSize()};
++  if (source.size > part->size) return reject(error, "size");
++  if (!verify(source, running, error)) return false;
++  if (!file.seekSet(0)) return reject(error, "seek");
++  return true;
++#else
++  (void)file;
++  error = "disabled";
++  return false;
++#endif
++}
++
++bool HalMuseCoexist::switchToMuse(std::string& error) {
++#if CROSSMUX_MUSE_COEXIST
++  const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
++  if (!verifyPartition(part, error)) return false;
++  if (esp_ota_set_boot_partition(part) != ESP_OK) return reject(error, "boot_select");
++  esp_restart();
++  return true;
++#else
++  error = "disabled";
++  return false;
++#endif
++}
+diff --git a/lib/hal/HalMuseCoexist.h b/lib/hal/HalMuseCoexist.h
+new file mode 100644
+index 0000000..1113584
+--- /dev/null
++++ b/lib/hal/HalMuseCoexist.h
+@@ -0,0 +1,14 @@
++#pragma once
++#include <esp_partition.h>
++
++#include <string>
++class HalFile;
++
++// Dedicated X4 Pro coexistence policy. Verification never changes flash or NVS.
++class HalMuseCoexist {
++ public:
++  static bool verifyPartition(const esp_partition_t* partition, std::string& error);
++  static bool verifyFile(const char* path, std::string& error);
++  static bool verifyOpenFile(HalFile& file, std::string& error);
++  static bool switchToMuse(std::string& error);
++};
+diff --git a/lib/hal/HalOtaSlot.cpp b/lib/hal/HalOtaSlot.cpp
+index dc56e74..d70aee3 100644
+--- a/lib/hal/HalOtaSlot.cpp
++++ b/lib/hal/HalOtaSlot.cpp
+@@ -36,6 +36,10 @@ extern "C" bool verifyRollbackLater() { return true; }
+ #endif
+ 
+ HalOtaSlot HalOtaSlot::inactive() {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  // The inactive application is the other system, never disposable scratch.
++  return {};
++#else
+   const esp_partition_t* partition = esp_ota_get_next_update_partition(nullptr);
+   const esp_partition_t* running = esp_ota_get_running_partition();
+   if (!partition || partition == running || partition->type != ESP_PARTITION_TYPE_APP ||
+@@ -44,6 +48,7 @@ HalOtaSlot HalOtaSlot::inactive() {
+     return {};
+   }
+   return HalOtaSlot(partition, partition->size);
++#endif
+ }
+ 
+ HalOtaSlot::RunningImageState HalOtaSlot::runningImageState() {
+@@ -73,6 +78,9 @@ bool HalOtaSlot::confirmRunningImage() {
+ }
+ 
+ bool HalOtaSlot::safeForScratchWrite() const {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  return false;
++#else
+   if (!valid()) return false;
+ 
+   switch (runningImageState()) {
+@@ -84,6 +92,7 @@ bool HalOtaSlot::safeForScratchWrite() const {
+       return false;
+   }
+   return false;
++#endif
+ }
+ 
+ bool HalOtaSlot::read(size_t offset, void* data, size_t length) const {
+@@ -91,12 +100,25 @@ bool HalOtaSlot::read(size_t offset, void* data, size_t length) const {
+ }
+ 
+ bool HalOtaSlot::erase(size_t offset, size_t length) const {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  (void)offset;
++  (void)length;
++  return false;
++#else
+   return contains(offset, length) && offset % ERASE_SIZE == 0 && length % ERASE_SIZE == 0 &&
+          esp_partition_erase_range(asPartition(partition_), offset, length) == ESP_OK;
++#endif
+ }
+ 
+ bool HalOtaSlot::write(size_t offset, const void* data, size_t length) const {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  (void)offset;
++  (void)data;
++  (void)length;
++  return false;
++#else
+   return contains(offset, length) && esp_partition_write(asPartition(partition_), offset, data, length) == ESP_OK;
++#endif
+ }
+ 
+ bool HalOtaSlot::contains(size_t offset, size_t length) const {
+diff --git a/lib/hal/MuseCoexistPublicKey.h b/lib/hal/MuseCoexistPublicKey.h
+new file mode 100644
+index 0000000..9616a5c
+--- /dev/null
++++ b/lib/hal/MuseCoexistPublicKey.h
+@@ -0,0 +1,7 @@
++#pragma once
++// P-256 public verification key; private signing key is never in this repository.
++inline constexpr char kMuseCoexistPublicKeyPem[] = R"KEY(-----BEGIN PUBLIC KEY-----
++MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESxyKtpdY69nVU+vOv2vmCETSyXtG
++v9x/7Q0Uht2Jw+G2Tv2ACjDbk8uR8CwxesVIjRP+nOvPow78HgPq0Iu6YA==
++-----END PUBLIC KEY-----
++)KEY";
+diff --git a/platformio.ini b/platformio.ini
+index d2c8682..2b8273f 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -581,6 +581,17 @@ build_flags =
+   -DCROSSPOINT_WAIT_FOR_USB_SERIAL
+   -DLOG_LEVEL=2
+ 
++; Coexistence is application-only: never upload this profile's bootloader or partitions.
++[env:x4pro_coexist]
++extends = x4pro_hardware
++build_flags =
++  ${x4pro_hardware.build_flags}
++  -DCROSSMUX_MUSE_COEXIST=1
++  -DCROSSPOINT_VERSION=\"${crosspoint.version}-x4pro-coexist\"
++  -DENABLE_SERIAL_LOG
++  -DLOG_LEVEL=1
++  -Wl,--wrap=nvs_flash_erase,--wrap=nvs_flash_erase_partition,--wrap=esp_partition_erase_range
++
+ [env:x4pro-gh_release]
+ extends = x4pro_hardware
+ build_flags =
+diff --git a/scripts/tests/test_muse_coexist.py b/scripts/tests/test_muse_coexist.py
+new file mode 100644
+index 0000000..cc0984d
+--- /dev/null
++++ b/scripts/tests/test_muse_coexist.py
+@@ -0,0 +1,281 @@
++"""Host security regression for the production coexist verifier (no reader access)."""
++from pathlib import Path
++import hashlib
++import os
++import shutil
++import struct
++import subprocess
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[2]
++
++
++CERT = b"MUSE_POCKET_COEXIST_CERT_V1".ljust(384, b"\0")
++TOKEN = b"MUSE_POCKET_TOKEN_SLOT_V1".ljust(128, b"\0")
++TOKEN_OFFSET, CERT_OFFSET = 288, 416
++
++
++def image(body):
++    header = bytearray(24)
++    header[0:2] = bytes([0xE9, 1])
++    header[12], header[23] = 9, 1
++    out = header + struct.pack("<II", 0x3C000020, len(body)) + body
++    checksum = 0xEF
++    for value in body:
++        checksum ^= value
++    offset = len(out) + 15 - len(out) % 16
++    out += bytes(offset - len(out)) + bytes([checksum])
++    return out + hashlib.sha256(out).digest()
++
++
++def repair(data):
++    body_size = struct.unpack_from("<I", data, 28)[0]
++    checksum = 0xEF
++    for value in data[32:32 + body_size]:
++        checksum ^= value
++    data[-33] = checksum
++    data[-32:] = hashlib.sha256(data[:-32]).digest()
++    return data
++
++
++class MuseCoexistTest(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.temp = tempfile.TemporaryDirectory()
++        cls.directory = Path(cls.temp.name)
++        openssl_root = Path("/opt/homebrew/opt/openssl@3")
++        cls.openssl = str(openssl_root / "bin/openssl") if openssl_root.exists() else shutil.which("openssl")
++        if not cls.openssl:
++            raise RuntimeError("OpenSSL is required for real P-256 host signatures")
++        cls.private = cls.directory / "fixture.pem"
++        subprocess.run([cls.openssl, "genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256",
++                        "-out", str(cls.private)], check=True, capture_output=True)
++        public = subprocess.check_output([cls.openssl, "pkey", "-in", str(cls.private), "-pubout"]).decode()
++        headers = dict(STUBS)
++        headers["MuseCoexistPublicKey.h"] = '#pragma once\ninline constexpr char kMuseCoexistPublicKeyPem[]=R"KEY(' + public + ')KEY";\n'
++        for name, content in headers.items():
++            path = cls.directory / name
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text(content)
++        (cls.directory / "harness.cpp").write_text(HARNESS)
++        cls.binary = cls.directory / "verifier"
++        flags = ["-lcrypto"]
++        if openssl_root.exists():
++            flags = ["-I" + str(openssl_root / "include"), "-L" + str(openssl_root / "lib"), "-lcrypto"]
++        subprocess.run([os.getenv("CXX", "c++"), "-std=c++17", "-DCROSSMUX_MUSE_COEXIST=1", "-Wall", "-Wextra",
++                        "-Werror", "-fsanitize=address,undefined", "-I" + str(cls.directory),
++                        "-I" + str(ROOT / "lib/hal"), str(ROOT / "lib/hal/HalMuseCoexist.cpp"),
++                        str(cls.directory / "harness.cpp"), "-o", str(cls.binary)] + flags, check=True)
++        cls.peer = image(bytearray(768))
++        (cls.directory / "peer.bin").write_bytes(cls.peer)
++        body = bytearray(768)
++        struct.pack_into("<I", body, 0, 0xABCD5432)
++        body[16:48] = b"1.0-zh".ljust(32, b"\0")
++        body[48:80] = b"muse-gadget".ljust(32, b"\0")
++        body[256:384], body[384:768] = TOKEN, CERT
++        unsigned = image(body)
++        canonical = bytearray(unsigned)
++        canonical[-33:] = bytes(33)
++        payload = struct.pack("<8s7I32s32s16s32s32sI", b"MPXCERT1", 1, len(unsigned), TOKEN_OFFSET,
++                              CERT_OFFSET, len(unsigned)-33, len(unsigned)-32, 9,
++                              b"muse-gadget", b"1.0-zh", b"xteink_x4_pro", hashlib.sha256(canonical).digest(),
++                              hashlib.sha256(cls.peer).digest(), len(cls.peer))
++        cls.good = cls.with_payload(unsigned, payload)
++        cls.good[TOKEN_OFFSET:TOKEN_OFFSET+128] = (b"mgst_" + b"A"*43).ljust(128, b"\0")
++        cls.good = repair(cls.good)
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.temp.cleanup()
++
++    @classmethod
++    def with_payload(cls, data, payload, certificate_offset=CERT_OFFSET):
++        path = cls.directory / "payload"
++        path.write_bytes(payload)
++        signature = subprocess.check_output([cls.openssl, "dgst", "-sha256", "-sign", str(cls.private), str(path)])
++        cert = CERT[:32] + payload + struct.pack("<H", len(signature)) + signature
++        out = bytearray(data)
++        out[certificate_offset:certificate_offset+384] = cert.ljust(384, b"\0")
++        return repair(out)
++
++    def run_image(self, data, mode="verify"):
++        path = self.directory / "candidate.bin"
++        path.write_bytes(data)
++        return subprocess.check_output([str(self.binary), str(path), str(self.directory / "peer.bin"), mode], text=True).strip()
++
++    def test_private_token_variation_and_file_verification(self):
++        self.assertEqual(self.run_image(self.good), "1 0 0")
++        self.assertEqual(self.run_image(self.good, "file"), "1 0 0")
++        self.assertEqual(self.run_image(self.good + b"trailing", "file"), "0 0 0")
++        changed = bytearray(self.good)
++        changed[TOKEN_OFFSET+5:TOKEN_OFFSET+47] = b"B"*42
++        self.assertEqual(self.run_image(repair(changed)), "1 0 0")
++
++    def test_code_mutation_is_not_authenticated_by_repaired_esp_hash(self):
++        data = bytearray(self.good); data[120] ^= 1
++        self.assertEqual(self.run_image(repair(data)), "0 0 0")
++
++    def test_certificate_marker_crosses_stream_chunk(self):
++        certificate_offset = 2030
++        body = bytearray(certificate_offset + 384 - 32)
++        body[:256] = self.good[32:288]
++        body[256:384] = TOKEN
++        body[certificate_offset-32:] = CERT
++        unsigned = image(body)
++        canonical = bytearray(unsigned); canonical[-33:] = bytes(33)
++        payload = struct.pack("<8s7I32s32s16s32s32sI", b"MPXCERT1", 1, len(unsigned), TOKEN_OFFSET,
++                              certificate_offset, len(unsigned)-33, len(unsigned)-32, 9,
++                              b"muse-gadget", b"1.0-zh", b"xteink_x4_pro", hashlib.sha256(canonical).digest(),
++                              hashlib.sha256(self.peer).digest(), len(self.peer))
++        data = self.with_payload(unsigned, payload, certificate_offset)
++        data[TOKEN_OFFSET:TOKEN_OFFSET+128] = (b"mgst_" + b"A"*43).ljust(128, b"\0")
++        self.assertEqual(self.run_image(repair(data)), "1 0 0")
++
++    def test_signature_peer_and_offsets_fail_closed(self):
++        data = bytearray(self.good); data[CERT_OFFSET+230] ^= 1
++        self.assertEqual(self.run_image(repair(data)), "0 0 0")
++        for payload_offset, value in [(16, 24), (16, 100), (16, CERT_OFFSET), (20, CERT_OFFSET+1), (24, 0), (180, len(self.peer)+1)]:
++            payload = bytearray(self.good[CERT_OFFSET+32:CERT_OFFSET+216])
++            struct.pack_into("<I", payload, payload_offset, value)
++            self.assertEqual(self.run_image(self.with_payload(self.good, payload)), "0 0 0")
++        payload = bytearray(self.good[CERT_OFFSET+32:CERT_OFFSET+216]); payload[148] ^= 1
++        self.assertEqual(self.run_image(self.with_payload(self.good, payload)), "0 0 0")
++        payload = bytearray(self.good[CERT_OFFSET+32:CERT_OFFSET+216]); payload[90] = 1
++        self.assertEqual(self.run_image(self.with_payload(self.good, payload)), "0 0 0")
++
++    def test_malformed_image_token_and_certificate_rejected(self):
++        self.assertEqual(self.run_image(self.good[:-1]), "0 0 0")
++        data = bytearray(self.good); data[-32] ^= 1
++        self.assertEqual(self.run_image(data), "0 0 0")
++        for offset, value in [(TOKEN_OFFSET+47, ord("B")), (TOKEN_OFFSET+48, 1), (CERT_OFFSET+383, 1)]:
++            data = bytearray(self.good); data[offset] = value
++            self.assertEqual(self.run_image(repair(data)), "0 0 0")
++        data = bytearray(self.good)
++        signature_size = struct.unpack_from("<H", data, CERT_OFFSET+216)[0]
++        struct.pack_into("<H", data, CERT_OFFSET+216, signature_size+1)
++        data[CERT_OFFSET+218+signature_size] = 1
++        self.assertEqual(self.run_image(repair(data)), "0 0 0")
++
++    def test_sdk_layout_and_boot_selection_failures_never_restart(self):
++        for mode in ["sdk_fail", "switch_sdk_fail", "overlap", "same", "unaligned", "nvs_overlap", "data_slot"]:
++            self.assertEqual(self.run_image(self.good, mode), "0 0 0")
++        self.assertEqual(self.run_image(self.good, "select_fail"), "0 1 0")
++        self.assertEqual(self.run_image(self.good, "switch"), "1 1 1")
++
++
++STUBS = {
++"esp_partition.h": r'''#pragma once
++#include <cstdint>
++#include <cstddef>
++using esp_err_t=int;
++constexpr int ESP_OK=0;
++constexpr int ESP_PARTITION_TYPE_APP=0,ESP_PARTITION_TYPE_DATA=1;
++constexpr int ESP_PARTITION_SUBTYPE_APP_OTA_MIN=16,ESP_PARTITION_SUBTYPE_APP_OTA_MAX=31;
++constexpr int ESP_PARTITION_SUBTYPE_DATA_NVS=2;
++struct esp_partition_t {int type,subtype;uint32_t address,size;const char* label;};
++int esp_partition_read(const esp_partition_t*,size_t,void*,size_t);
++const esp_partition_t* esp_partition_find_first(int,int,const char*);
++''',
++"esp_ota_ops.h": r'''#pragma once
++#include <esp_partition.h>
++constexpr uint32_t ESP_APP_DESC_MAGIC_WORD=0xabcd5432;
++struct esp_app_desc_t {uint32_t magic_word,secure_version,reserved[2];char version[32],project_name[32];uint8_t rest[176];};
++const esp_partition_t* esp_ota_get_running_partition();
++const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t*);
++int esp_ota_set_boot_partition(const esp_partition_t*);
++''',
++"esp_image_format.h": r'''#pragma once
++#include <esp_partition.h>
++struct esp_partition_pos_t {uint32_t offset,size;};
++struct esp_image_metadata_t {uint32_t image_len;};
++constexpr int ESP_IMAGE_VERIFY=0;
++int esp_image_verify(int,const esp_partition_pos_t*,esp_image_metadata_t*);
++''',
++"esp_flash.h": "#pragma once\n#include <cstdint>\nint esp_flash_get_size(void*,uint32_t*);\n",
++"esp_system.h": "#pragma once\nvoid esp_restart();\n",
++"Logging.h": '#pragma once\n#define LOG_INF(...) ((void)0)\n',
++"HalStorage.h": r'''#pragma once
++#include <fstream>
++class HalFile { public: std::ifstream stream;size_t size=0;
++ explicit operator bool() const {return stream.is_open();}
++ size_t fileSize(){return size;}
++ bool seekSet(size_t n){stream.clear();stream.seekg(n);return bool(stream);}
++ int read(void* out,size_t n){stream.read(static_cast<char*>(out),n);return stream.gcount();}
++};
++struct Store {bool openFileForRead(const char*,const char* path,HalFile& f){
++ f.stream.open(path,std::ios::binary);if(!f.stream)return false;
++ f.stream.seekg(0,std::ios::end);f.size=f.stream.tellg();f.stream.seekg(0);return true;
++}};
++inline Store Storage;
++''',
++"mbedtls/sha256.h": r'''#pragma once
++#include <openssl/evp.h>
++struct mbedtls_sha256_context {EVP_MD_CTX* p;};
++inline void mbedtls_sha256_init(mbedtls_sha256_context* c){c->p=EVP_MD_CTX_new();}
++inline int mbedtls_sha256_starts(mbedtls_sha256_context* c,int){return EVP_DigestInit_ex(c->p,EVP_sha256(),nullptr)==1?0:-1;}
++inline int mbedtls_sha256_update(mbedtls_sha256_context* c,const unsigned char* p,size_t n){return EVP_DigestUpdate(c->p,p,n)==1?0:-1;}
++inline int mbedtls_sha256_finish(mbedtls_sha256_context* c,unsigned char* p){return EVP_DigestFinal_ex(c->p,p,nullptr)==1?0:-1;}
++inline void mbedtls_sha256_free(mbedtls_sha256_context* c){EVP_MD_CTX_free(c->p);}
++''',
++"mbedtls/pk.h": r'''#pragma once
++#include <openssl/pem.h>
++constexpr int MBEDTLS_MD_SHA256=1;
++struct mbedtls_pk_context {EVP_PKEY* p;};
++inline void mbedtls_pk_init(mbedtls_pk_context* c){c->p=nullptr;}
++inline int mbedtls_pk_parse_public_key(mbedtls_pk_context* c,const unsigned char* p,size_t n){
++ BIO* b=BIO_new_mem_buf(p,n);c->p=PEM_read_bio_PUBKEY(b,nullptr,nullptr,nullptr);BIO_free(b);return c->p?0:-1;
++}
++inline int mbedtls_pk_verify(mbedtls_pk_context* c,int,const unsigned char* hash,size_t n,const unsigned char* sig,size_t size){
++ EVP_PKEY_CTX* p=EVP_PKEY_CTX_new(c->p,nullptr);int ok=EVP_PKEY_verify_init(p);
++ if(ok==1)ok=EVP_PKEY_CTX_set_signature_md(p,EVP_sha256());
++ if(ok==1)ok=EVP_PKEY_verify(p,sig,size,hash,n);EVP_PKEY_CTX_free(p);return ok==1?0:-1;
++}
++inline void mbedtls_pk_free(mbedtls_pk_context* c){EVP_PKEY_free(c->p);}
++''',
++}
++
++HARNESS = r'''
++#include <HalMuseCoexist.h>
++#include <esp_image_format.h>
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <vector>
++#include <cstring>
++std::vector<uint8_t> target,peer;
++esp_partition_t running{0,16,0x10000,0x640000,"app0"},candidate{0,17,0x650000,0x640000,"app1"};
++esp_partition_t nvs{1,2,0x9000,0x5000,"nvs"};
++std::string mode;int selections=0,restarts=0;
++int esp_partition_read(const esp_partition_t* p,size_t off,void* out,size_t n){
++ const auto& data=p==&running?peer:target;
++ if(off>data.size() || n>data.size()-off)return -1;
++ std::memcpy(out,data.data()+off,n);return 0;
++}
++const esp_partition_t* esp_partition_find_first(int,int,const char*){return &nvs;}
++const esp_partition_t* esp_ota_get_running_partition(){return &running;}
++const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t*){return &candidate;}
++int esp_flash_get_size(void*,uint32_t* size){*size=0x1000000;return 0;}
++int esp_image_verify(int,const esp_partition_pos_t*,esp_image_metadata_t* m){m->image_len=target.size();return mode=="sdk_fail" || mode=="switch_sdk_fail"?-1:0;}
++int esp_ota_set_boot_partition(const esp_partition_t*){++selections;return mode=="select_fail"?-1:0;}
++void esp_restart(){++restarts;}
++int main(int argc,char** argv){
++ if(argc!=4)return 2;
++ std::ifstream a(argv[1],std::ios::binary),b(argv[2],std::ios::binary);
++ target.assign(std::istreambuf_iterator<char>(a),{});peer.assign(std::istreambuf_iterator<char>(b),{});mode=argv[3];
++ if(mode=="overlap")candidate.address=0x20000;
++ if(mode=="same")candidate=running;
++ if(mode=="unaligned")++candidate.address;
++ if(mode=="nvs_overlap")nvs.address=candidate.address;
++ if(mode=="data_slot")candidate.type=1;
++ std::string error;bool ok;
++ if(mode=="switch" || mode=="select_fail" || mode=="switch_sdk_fail")ok=HalMuseCoexist::switchToMuse(error);
++ else if(mode=="file")ok=HalMuseCoexist::verifyFile(argv[1],error);
++ else ok=HalMuseCoexist::verifyPartition(&candidate,error);
++ std::cout<<ok<<" "<<selections<<" "<<restarts<<"\n";
++}
++'''
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/scripts/tests/test_muse_coexist_guards.py b/scripts/tests/test_muse_coexist_guards.py
+new file mode 100644
+index 0000000..b70108f
+--- /dev/null
++++ b/scripts/tests/test_muse_coexist_guards.py
+@@ -0,0 +1,265 @@
++"""Host checks for the dedicated dual-system profile's destructive-write guards."""
++import pathlib
++import subprocess
++import tempfile
++import unittest
++
++ROOT = pathlib.Path(__file__).resolve().parents[2]
++STUBS = {
++    "Logging.h": "#define LOG_ERR(...) ((void)0)\n#define LOG_INF(...) ((void)0)\n",
++    "esp_partition.h": r"""#pragma once
++#include <cstddef>
++#include <cstdint>
++using esp_err_t = int;
++constexpr int ESP_OK=0, ESP_ERR_NOT_ALLOWED=0x106, ESP_FAIL=-1;
++constexpr int ESP_PARTITION_TYPE_APP=0, ESP_PARTITION_TYPE_DATA=1;
++constexpr int ESP_PARTITION_SUBTYPE_DATA_NVS=2;
++constexpr int ESP_PARTITION_SUBTYPE_APP_OTA_MIN=0x10, ESP_PARTITION_SUBTYPE_APP_OTA_MAX=0x1f;
++struct esp_partition_t {int type; int subtype; size_t size;};
++int esp_partition_read(const esp_partition_t*,size_t,void*,size_t);
++int esp_partition_erase_range(const esp_partition_t*,size_t,size_t);
++int esp_partition_write(const esp_partition_t*,size_t,const void*,size_t);
++""",
++    "esp_ota_ops.h": r"""#pragma once
++#include "esp_partition.h"
++enum esp_ota_img_states_t { ESP_OTA_IMG_NEW,ESP_OTA_IMG_PENDING_VERIFY,ESP_OTA_IMG_VALID,ESP_OTA_IMG_INVALID,ESP_OTA_IMG_ABORTED,ESP_OTA_IMG_UNDEFINED };
++const esp_partition_t* esp_ota_get_running_partition();
++const esp_partition_t* esp_ota_get_next_update_partition(void*);
++const esp_partition_t* esp_ota_get_boot_partition();
++int esp_ota_get_state_partition(const esp_partition_t*,esp_ota_img_states_t*);
++int esp_ota_mark_app_valid_cancel_rollback();
++""",
++    "nvs_flash.h": r"""#pragma once
++#include "esp_partition.h"
++constexpr int ESP_ERR_NVS_NO_FREE_PAGES=0x110d, ESP_ERR_NVS_NEW_VERSION_FOUND=0x1110;
++""",
++    "HalMuseCoexist.h": r"""#pragma once
++#include <string>
++class HalMuseCoexist { public: static bool switchToMuse(std::string&); };
++""",
++}
++
++
++class CoexistGuardTests(unittest.TestCase):
++    def compile_run(self, source, harness, enabled=True):
++        with tempfile.TemporaryDirectory() as directory:
++            tmp = pathlib.Path(directory)
++            for name, data in STUBS.items():
++                (tmp / name).write_text(data)
++            (tmp / "harness.cpp").write_text(harness)
++            cmd = ["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", str(tmp),
++                   "-I", str(ROOT / "lib/hal")]
++            if enabled:
++                cmd.append("-DCROSSMUX_MUSE_COEXIST=1")
++            cmd.extend([str(ROOT / source), str(tmp / "harness.cpp"), "-o", str(tmp / "test")])
++            subprocess.run(cmd, check=True, capture_output=True)
++            subprocess.run([str(tmp / "test")], check=True)
++
++    def test_scratch_slot_never_erases_or_writes(self):
++        harness = r"""
++#include "HalOtaSlot.h"
++#include "esp_ota_ops.h"
++#include <cassert>
++static esp_partition_t running{0,0x10,0x7e0000}, other{0,0x11,0x7e0000};
++static int erases=0,writes=0;
++const esp_partition_t* esp_ota_get_running_partition(){return &running;}
++const esp_partition_t* esp_ota_get_next_update_partition(void*){return &other;}
++const esp_partition_t* esp_ota_get_boot_partition(){return &running;}
++int esp_ota_get_state_partition(const esp_partition_t*,esp_ota_img_states_t* state){*state=ESP_OTA_IMG_VALID;return 0;}
++int esp_ota_mark_app_valid_cancel_rollback(){return 0;}
++int esp_partition_read(const esp_partition_t*,size_t,void*,size_t){return 0;}
++int esp_partition_erase_range(const esp_partition_t*,size_t,size_t){++erases;return 0;}
++int esp_partition_write(const esp_partition_t*,size_t,const void*,size_t){++writes;return 0;}
++int main(){auto slot=HalOtaSlot::inactive(); char byte=0;
++#ifdef CROSSMUX_MUSE_COEXIST
++assert(!slot.valid()); assert(!slot.safeForScratchWrite());
++assert(!slot.erase(0,4096)); assert(!slot.write(0,&byte,1)); assert(erases==0&&writes==0);
++#else
++assert(slot.valid()); assert(slot.safeForScratchWrite());
++assert(slot.erase(0,4096)); assert(slot.write(0,&byte,1)); assert(erases==1&&writes==1);
++#endif
++}
++"""
++        self.compile_run("lib/hal/HalOtaSlot.cpp", harness)
++        self.compile_run("lib/hal/HalOtaSlot.cpp", harness, enabled=False)
++
++    def test_normal_ota_and_sd_candidate_rejections(self):
++        import sys
++        sys.path.insert(0, str(ROOT / "scripts/tests"))
++        from test_firmware_update_refresh import HARNESS
++        from test_reading_ui_regressions import method, run_cpp
++        updater = (ROOT / "src/network/OtaUpdater.cpp").read_text()
++        flasher = (ROOT / "src/network/FirmwareFlasher.cpp").read_text()
++        harness = HARNESS.replace("OK, UPDATE_OLDER_ERROR", "OK, UNSUPPORTED_CHANNEL, UPDATE_OLDER_ERROR")
++        harness = harness.replace("OK,NO_PARTITION", "OK,TOO_LARGE,NO_PARTITION")
++        harness = harness.replace("struct HalFile {", "size_t sdCandidateSize=409600;\nstruct HalFile {")
++        harness = harness.replace("size_t fileSize() const { return 409600; }", "size_t fileSize() const { return sdCandidateSize; }")
++        harness = harness.replace("int switches = 0, restarts = 0, aborts = 0, fontReloads = 0, writes = 0;",
++                                  "int switches = 0, restarts = 0, aborts = 0, fontReloads = 0, writes = 0, erases = 0;")
++        harness = harness.replace("switches = restarts = aborts = fontReloads = writes = 0;",
++                                  "switches = restarts = aborts = fontReloads = writes = erases = 0;")
++        harness = harness.replace("flashOperation(); return fault==Failure::Erase", "flashOperation(); ++erases; return fault==Failure::Erase")
++        program = "#define CROSSMUX_MUSE_COEXIST 1\n" + harness + r"""
++static bool signedWrittenGood = true, signedOpenedGood = true;
++class HalMuseCoexist {
++ public:
++  static bool verifyPartition(const esp_partition_t*, std::string&) { return signedWrittenGood; }
++  static bool verifyOpenFile(HalFile&, std::string&) { return signedOpenedGood; }
++};
++"""
++        import re
++        constants = "\n".join(re.findall(r"constexpr size_t (?:SEC|BLK|CHUNK) = [^;]+;", flasher))
++        program += method(updater, "OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(")
++        program += "\nnamespace firmware_flash {\n" + constants + "\n"
++        program += method(flasher, "Result flashFromSdPath(") + "\n}\n"
++        program += r"""
++int main() {
++  (void)ESP; (void)UI_10_FONT_ID; (void)UI_12_FONT_ID; (void)SMALL_FONT_ID; (void)sdFontSystem;
++  reset(Failure::None);
++  OtaUpdater updater;
++  assert(updater.installUpdate(nullptr,nullptr)==OtaUpdater::UNSUPPORTED_CHANNEL);
++  assert(erases==0&&writes==0&&switches==0&&restarts==0);
++  reset(Failure::Verify);
++  // Even a picker-validated candidate is fully rechecked before peer erase.
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr,true)==firmware_flash::Result::BAD_SHA);
++  assert(erases==0&&writes==0&&switches==0&&restarts==0);
++  reset(Failure::None); signedOpenedGood=false;
++  // The earlier validation succeeded, but the opened file differs: reject
++  // before the first peer erase or write, even for alreadyValidated callers.
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr,true)==firmware_flash::Result::BAD_SHA);
++  assert(erases==0&&writes==0&&switches==0&&restarts==0);
++  reset(Failure::None); signedOpenedGood=true; sdCandidateSize=2*1024*1024;
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr,true)==firmware_flash::Result::TOO_LARGE);
++  assert(erases==0&&writes==0&&switches==0&&restarts==0);
++  reset(Failure::None); sdCandidateSize=409600; signedWrittenGood=false;
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr)==firmware_flash::Result::BAD_SHA);
++  assert(writes>0&&switches==0&&restarts==0);
++  reset(Failure::Switch); signedWrittenGood=true;
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr)==firmware_flash::Result::OTADATA_FAIL);
++  assert(switches==0&&restarts==0);
++  reset(Failure::None);
++  assert(firmware_flash::flashFromSdPath("signed",nullptr,nullptr)==firmware_flash::Result::OK);
++  assert(switches==1&&restarts==0);
++}
++"""
++        run_cpp(program)
++
++    def test_sd_font_load_with_unavailable_flash_and_psram_fallback(self):
++        # Compile the real loader, real cache and protected real OTA HAL together.
++        fixture = (ROOT / "test/sd_card_font/SdCardFontTest.cpp").read_text()
++        fixture = fixture[fixture.index("namespace {\nconstexpr uint32_t FIRST"):fixture.index("uint32_t residentCount(")]
++        harness = r"""
++#include "HalStorage.h"
++#include "SdCardFont.h"
++#include "esp_ota_ops.h"
++#include "esp_heap_caps.h"
++#include <cassert>
++static esp_partition_t running{0,0x10,0x7e0000}, other{0,0x11,0x7e0000};
++static int erases=0,writes=0,flashReads=0;
++const esp_partition_t* esp_ota_get_running_partition(){return &running;}
++const esp_partition_t* esp_ota_get_next_update_partition(void*){return &other;}
++const esp_partition_t* esp_ota_get_boot_partition(){return &running;}
++int esp_ota_get_state_partition(const esp_partition_t*,esp_ota_img_states_t* state){*state=ESP_OTA_IMG_VALID;return 0;}
++int esp_ota_mark_app_valid_cancel_rollback(){return 0;}
++int esp_partition_read(const esp_partition_t*,size_t,void*,size_t){++flashReads;return 0;}
++int esp_partition_erase_range(const esp_partition_t*,size_t,size_t){++erases;return 0;}
++int esp_partition_write(const esp_partition_t*,size_t,const void*,size_t){++writes;return 0;}
++""" + fixture + r"""
++}
++int main(){
++ for(bool available : {true,false}) {
++  psramAvailable=available; psramAllocations=0; makeFont();
++  SdCardFont font;
++  assert(font.load("fixture",true,true)); // inherited Flash preference still loads SD
++  assert(!font.usingFlash());
++  assert(font.prewarm(page(FIRST,5).c_str(),1,false,false,false)==0);
++  const auto* data=font.getEpdFont()->data;
++  assert(data->intervalCount>0);
++  for(uint32_t i=0;i<5;i++) {
++   const EpdGlyph* glyph=nullptr;
++   for(uint32_t j=0;j<data->intervalCount;j++) {
++    const auto& interval=data->intervals[j];
++    if(FIRST+i>=interval.first && FIRST+i<=interval.last)
++     glyph=data->glyph+interval.offset+FIRST+i-interval.first;
++   }
++   assert(glyph&&glyph->dataLength==BITMAP_BYTES);
++   for(uint16_t b=0;b<BITMAP_BYTES;b++)assert(data->bitmap[glyph->dataOffset+b]==i);
++  }
++  assert(sdFontTestReads>0);
++  assert(available ? psramAllocations>0 : psramAllocations==0);
++  assert(erases==0&&writes==0&&flashReads==0);
++ }
++}
++"""
++        with tempfile.TemporaryDirectory() as directory:
++            tmp = pathlib.Path(directory)
++            for name in ("esp_partition.h", "esp_ota_ops.h"):
++                (tmp / name).write_text(STUBS[name])
++            storage = (ROOT / "test/sd_card_font/stubs/HalStorage.h").read_text()
++            storage = storage.replace("  bool close() {", "  size_t fileSize() const { return sdFontTestFile.size(); }\n  bool close() {")
++            (tmp / "HalStorage.h").write_text(storage)
++            (tmp / "esp_heap_caps.h").write_text(r"""#pragma once
++#include <cstdlib>
++#include <cstddef>
++constexpr int MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2,MALLOC_CAP_SPIRAM=4;
++inline bool psramAvailable=true;
++inline int psramAllocations=0;
++inline size_t heap_caps_get_free_size(int){return psramAvailable?4*1024*1024:0;}
++inline size_t heap_caps_get_largest_free_block(int){return psramAvailable?4*1024*1024:0;}
++inline void* heap_caps_malloc(size_t n,int caps){if(caps&MALLOC_CAP_SPIRAM)++psramAllocations;return std::malloc(n);}
++inline void* heap_caps_calloc(size_t n,size_t s,int caps){if(caps&MALLOC_CAP_SPIRAM)++psramAllocations;return std::calloc(n,s);}
++""")
++            (tmp / "harness.cpp").write_text(harness)
++            cmd = ["c++", "-std=c++20", "-DCROSSMUX_MUSE_COEXIST=1", "-DBOARD_HAS_PSRAM"]
++            for include in (tmp, ROOT / "test/sd_card_font/stubs", ROOT / "test/minibidi_arabic/stubs",
++                            ROOT / "lib/EpdFont", ROOT / "lib/Utf8", ROOT / "lib/Memory", ROOT / "lib/MiniBidi", ROOT / "lib/hal"):
++                cmd.extend(["-I", str(include)])
++            for source in ("lib/EpdFont/SdCardFont.cpp", "lib/EpdFont/SdCardFontCache.cpp",
++                           "lib/hal/HalOtaSlot.cpp", "lib/Utf8/Utf8.cpp", "lib/MiniBidi/BidiUtils.cpp"):
++                cmd.append(str(ROOT / source))
++            bidi_object = tmp / "minibidi.o"
++            subprocess.run(["cc", "-std=c11", "-c", str(ROOT / "lib/MiniBidi/minibidi.c"), "-o", str(bidi_object)], check=True)
++            cmd.extend([str(bidi_object), str(tmp / "harness.cpp"), "-o", str(tmp / "test")])
++            subprocess.run(cmd, check=True)
++            subprocess.run([str(tmp / "test")], check=True)
++
++    def test_nvs_errors_never_format_shared_partition(self):
++        self.compile_run("src/platform/coexist_nvs_guard.cpp", r"""
++#include "nvs_flash.h"
++#include "HalMuseCoexist.h"
++#include <cassert>
++static int erases=0, startupSwitches=0;
++bool HalMuseCoexist::switchToMuse(std::string&){++startupSwitches;return false;}
++extern "C" int __real_nvs_flash_erase(){++erases;return 0;}
++extern "C" int __real_nvs_flash_erase_partition(const char*){++erases;return 0;}
++extern "C" int __real_esp_partition_erase_range(const esp_partition_t*,size_t,size_t){++erases;return 0;}
++extern "C" int __wrap_nvs_flash_erase();
++extern "C" int __wrap_nvs_flash_erase_partition(const char*);
++extern "C" int __wrap_esp_partition_erase_range(const esp_partition_t*,size_t,size_t);
++// initArduino's recovery path requests a whole-partition format after these
++// two init failures. Exercise that caller request against the production guard.
++int coreNvsRecovery(int error) {
++ if(error==ESP_ERR_NVS_NO_FREE_PAGES||error==ESP_ERR_NVS_NEW_VERSION_FOUND) {
++  esp_partition_t nvs{1,2,0x5000};
++  return __wrap_esp_partition_erase_range(&nvs,0,nvs.size);
++ }
++ return error;
++}
++int main(){
++for(int error : {ESP_ERR_NVS_NO_FREE_PAGES,ESP_ERR_NVS_NEW_VERSION_FOUND,ESP_FAIL}){
++ assert(coreNvsRecovery(error)!=0);
++ assert(__wrap_nvs_flash_erase()!=0); assert(__wrap_nvs_flash_erase_partition("nvs")!=0);
++ esp_partition_t nvs{1,2,0x5000};
++ assert(__wrap_esp_partition_erase_range(&nvs,0,nvs.size)!=0);
++ assert(erases==0&&startupSwitches==0);
++}
++esp_partition_t nvs{1,2,0x5000}, app{0,0x11,0x7e0000};
++assert(__wrap_esp_partition_erase_range(&nvs,4096,4096)==0);
++assert(__wrap_esp_partition_erase_range(&app,0,4096)==0);
++assert(erases==2);
++}
++""")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/src/activities/boot_sleep/BootActivity.cpp b/src/activities/boot_sleep/BootActivity.cpp
+index fc6399d..3827ba8 100644
+--- a/src/activities/boot_sleep/BootActivity.cpp
++++ b/src/activities/boot_sleep/BootActivity.cpp
+@@ -45,6 +45,10 @@ void BootActivity::runPostOta() {
+   }
+   LOG_INF("OTA", "Running image confirmed after startup display");
+ 
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  // The other OTA slot contains Muse, not a font acceleration cache.
++  return;
++#endif
+   if (!allowAutoPreload_ || SETTINGS.sdFontFlashPreload == 0 || SETTINGS.sdFontFamilyName[0] == '\0') return;
+ 
+   const auto* family = sdFontSystem.registry().findFamily(SETTINGS.sdFontFamilyName);
+diff --git a/src/activities/settings/SettingsActivity.cpp b/src/activities/settings/SettingsActivity.cpp
+index 6ef57ec..b9d62d2 100644
+--- a/src/activities/settings/SettingsActivity.cpp
++++ b/src/activities/settings/SettingsActivity.cpp
+@@ -5,6 +5,9 @@
+ #include <HalDisplay.h>
+ #include <HalStorage.h>
+ #include <HalSystem.h>
++#if CROSSMUX_MUSE_COEXIST
++#include <HalMuseCoexist.h>
++#endif
+ #include <LibraryBuilder.h>
+ #include <Logging.h>
+ #if (FREEINK_DEVICE_MURPHY_M4 || FREEINK_CAP_HAPTIC) && !defined(SIMULATOR)
+@@ -371,6 +374,9 @@ void SettingsActivity::rebuildSettingsLists() {
+   // UI but are intentionally absent from release assets in this sync.
+   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
+   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
++#if CROSSMUX_MUSE_COEXIST
++  systemSettings.push_back(SettingInfo::Action(StrId::STR_SWITCH_TO_MUSE, SettingAction::SwitchToMuse));
++#endif
+   systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
+   systemSettings.push_back(SettingInfo::Action(StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts));
+   if (usesAccordion()) {
+@@ -852,6 +858,20 @@ void SettingsActivity::toggleCurrentSetting() {
+       case SettingAction::SdFirmwareUpdate:
+         startActivityForResultWith<SdFirmwareUpdateActivity>(resultHandler);
+         break;
++      case SettingAction::SwitchToMuse:
++#if CROSSMUX_MUSE_COEXIST
++      {
++        std::string error;
++        requestUpdateAndWait();
++        if (!HalMuseCoexist::switchToMuse(error)) {
++          LOG_ERR("MUSE", "Switch rejected: %s", error.c_str());
++          optionPopup.show(StrId::STR_MUSE_SWITCH_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0,
++                           [](int) {});
++          requestUpdate();
++        }
++      }
++#endif
++      break;
+       case SettingAction::DownloadFonts:
+         releaseListsForMemoryHungryChild();
+         if (!startActivityForResultWith<FontDownloadActivity>(resultHandler)) {
+diff --git a/src/activities/settings/SettingsActivity.h b/src/activities/settings/SettingsActivity.h
+index 5f03d64..4b96ba3 100644
+--- a/src/activities/settings/SettingsActivity.h
++++ b/src/activities/settings/SettingsActivity.h
+@@ -28,6 +28,7 @@ enum class SettingAction {
+   RestoreSystemSettings,
+   CheckForUpdates,
+   SdFirmwareUpdate,
++  SwitchToMuse,
+   Language,
+   DownloadFonts,
+   ManageDictionaries,
+diff --git a/src/activities/settings/TextSettingsActivity.cpp b/src/activities/settings/TextSettingsActivity.cpp
+index ea42abe..8ee962a 100644
+--- a/src/activities/settings/TextSettingsActivity.cpp
++++ b/src/activities/settings/TextSettingsActivity.cpp
+@@ -877,6 +877,13 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
+ }
+ 
+ void TextSettingsActivity::finishFinalFont(const bool accepted) {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  (void)accepted;
++  SETTINGS.sdFontFlashPreload = 0;
++  SETTINGS.saveToFile();
++  completeExit();
++  return;
++#endif
+   SETTINGS.sdFontFlashPreload = 0;
+   SETTINGS.saveToFile();
+   const auto* family = registry_ ? registry_->findFamily(SETTINGS.sdFontFamilyName) : nullptr;
+diff --git a/src/network/FirmwareFlasher.cpp b/src/network/FirmwareFlasher.cpp
+index 9d7a1d3..a3982c3 100644
+--- a/src/network/FirmwareFlasher.cpp
++++ b/src/network/FirmwareFlasher.cpp
+@@ -2,6 +2,9 @@
+ 
+ #include <Arduino.h>
+ #include <HalStorage.h>
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++#include <HalMuseCoexist.h>
++#endif
+ #include <Logging.h>
+ #include <esp_ota_ops.h>
+ #include <esp_partition.h>
+@@ -269,6 +272,13 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
+ 
+   mbedtls_sha256_free(&shaCtx);
+   file.close();
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  std::string error;
++  if (!HalMuseCoexist::verifyFile(sdPath, error)) {
++    LOG_ERR("FLASH", "Muse candidate rejected: %s", error.c_str());
++    return Result::BAD_SHA;
++  }
++#endif
+   return Result::OK;
+ }
+ 
+@@ -286,7 +296,15 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
+   // size (e.g. SdFirmwareUpdateActivity validates before the confirmation
+   // prompt), skip the redundant integrity scan. We still keep the partition
+   // lookup so the rest of the flashing path stays unchanged.
+-  if (!alreadyValidated) {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  // Recheck the signed file immediately before erasing the peer, even if the
++  // picker validated it earlier. Ordinary reader update images are rejected.
++  (void)alreadyValidated;
++  const bool needsValidation = true;
++#else
++  const bool needsValidation = !alreadyValidated;
++#endif
++  if (needsValidation) {
+     const Result validateRes = validateImageFile(sdPath, dest->size);
+     if (validateRes != Result::OK) {
+       LOG_ERR("FLASH", "image validation failed: %s", resultName(validateRes));
+@@ -301,6 +319,16 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
+   }
+ 
+   const size_t firmwareSize = file.fileSize();
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  if (firmwareSize > dest->size) return Result::TOO_LARGE;
++  // Validate this open handle, then stream the same handle. Reopening a path
++  // after verification could select a different SD file before peer erase.
++  std::string openedError;
++  if (!HalMuseCoexist::verifyOpenFile(file, openedError)) {
++    LOG_ERR("FLASH", "Opened Muse candidate rejected: %s", openedError.c_str());
++    return Result::BAD_SHA;
++  }
++#endif
+   LOG_INF("FLASH", "src=%s size=%u dest=%s @0x%x partsize=%u", sdPath, static_cast<unsigned>(firmwareSize), dest->label,
+           static_cast<unsigned>(dest->address), static_cast<unsigned>(dest->size));
+ 
+@@ -347,7 +375,18 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
+   }
+   file.close();
+ 
+-  if (!ota_boot::switchTo(dest)) {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  std::string error;
++  if (!HalMuseCoexist::verifyPartition(dest, error)) {
++    LOG_ERR("FLASH", "Written Muse verification failed: %s", error.c_str());
++    return Result::BAD_SHA;
++  }
++  // Do not bypass the actual bootloader's image/rollback compatibility checks.
++  const bool selected = esp_ota_set_boot_partition(dest) == ESP_OK;
++#else
++  const bool selected = ota_boot::switchTo(dest);
++#endif
++  if (!selected) {
+     LOG_ERR("FLASH", "otadata switch failed");
+     return Result::OTADATA_FAIL;
+   }
+diff --git a/src/network/OtaUpdater.cpp b/src/network/OtaUpdater.cpp
+index 734e4d0..021e2e2 100644
+--- a/src/network/OtaUpdater.cpp
++++ b/src/network/OtaUpdater.cpp
+@@ -61,6 +61,10 @@ static_assert(releaseUrlCapacity < 256);
+ }  // namespace
+ 
+ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedChannel) {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  (void)requestedChannel;
++  return UNSUPPORTED_CHANNEL;
++#endif
+   channel = requestedChannel;
+   char releaseUrl[releaseUrlCapacity];
+   const char* channelQuery = channel == Channel::Nightly ? "&channel=nightly" : "";
+@@ -177,6 +181,11 @@ bool OtaUpdater::isUpdateNewer() const {
+ const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
+ 
+ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++  (void)onProgress;
++  (void)ctx;
++  return UNSUPPORTED_CHANNEL;
++#endif
+   if (!isUpdateNewer()) {
+     return UPDATE_OLDER_ERROR;
+   }
+diff --git a/src/platform/coexist_nvs_guard.cpp b/src/platform/coexist_nvs_guard.cpp
+new file mode 100644
+index 0000000..12834f2
+--- /dev/null
++++ b/src/platform/coexist_nvs_guard.cpp
+@@ -0,0 +1,24 @@
++// The dedicated profile must preserve Muse pairing even when NVS is unreadable.
++#if defined(CROSSMUX_MUSE_COEXIST) && CROSSMUX_MUSE_COEXIST
++#include <esp_partition.h>
++
++extern "C" {
++esp_err_t __real_esp_partition_erase_range(const esp_partition_t*, size_t, size_t);
++
++esp_err_t __wrap_nvs_flash_erase() { return ESP_ERR_NOT_ALLOWED; }
++esp_err_t __wrap_nvs_flash_erase_partition(const char* partitionLabel) {
++  (void)partitionLabel;
++  return ESP_ERR_NOT_ALLOWED;
++}
++
++esp_err_t __wrap_esp_partition_erase_range(const esp_partition_t* partition, size_t offset, size_t length) {
++  // Protect initArduino's direct whole-partition recovery erase. Sector-level
++  // NVS garbage collection remains available for normal bounded persistence.
++  if (partition && partition->type == ESP_PARTITION_TYPE_DATA &&
++      partition->subtype == ESP_PARTITION_SUBTYPE_DATA_NVS && offset == 0 && length >= partition->size) {
++    return ESP_ERR_NOT_ALLOWED;
++  }
++  return __real_esp_partition_erase_range(partition, offset, length);
++}
++}
++#endif

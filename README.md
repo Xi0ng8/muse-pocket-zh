@@ -2,16 +2,18 @@
 
 基于 [Federico Viticci 的 Muse Pocket](https://github.com/viticci/muse-pocket)
 
-把 **阅星瞳 / Xteink X4 Pro** 变成 Muse 随身墨水屏，显示角色图、名字和活动状态。这个社区分支为原项目增加中文显示，不是 Xteink、Meta 或原作者的官方版本。
+把 **阅星瞳 / Xteink X4 Pro** 变成 Muse 随身墨水屏，显示角色图、名字和活动状态。当前 **`v0.1.5-coexist-zh` 是实验预发布**：配套 CrossMux `1.6.5-x4pro-coexist`，让两个应用槽分别运行 CrossMux 阅读器和中文 Muse Pocket。
+
+这是社区分支，不是 Xteink、Meta 或原作者的官方版本。原 `v0.1.4-zh` 仍用于 CrossPoint 1.6.5 X4 Pro 环境；两个版本的安装与恢复目标不同，不要混用。
 
 ## 刷机风险（安装前必读）
 
 **刷入第三方固件有风险，可能导致设备无法启动、数据丢失或需要额外工具恢复。请理解风险后自行决定安装。** 本项目是社区固件，不是厂商官方升级，也不保证适用于所有 X4 Pro 屏幕与硬件批次。
 
 - **先备份 SD 卡上的书籍、阅读进度与需要保留的文件。** 保持电量充足，更新过程中不要断电、重启或拔卡。
-- **只用于 X4 Pro / ESP32-S3，并先安装准确的 CrossPoint 1.6.5 X4 Pro。** 不要刷到普通 X4、X3 或其他设备。
-- **只使用应用镜像与 CrossPoint 的 SD 卡固件更新。** 不要使用完整刷机包、`idf.py flash`，不要改 bootloader、分区表或 eFuses。
-- **保留准确的 CrossPoint 恢复槽。** 不要把 CrossMux 或其他固件覆盖到该槽；显示「恢复未验证」时停止，不要绕过校验。
+- **只用于 X4 Pro / ESP32-S3。** 首次迁移从准确的 CrossPoint 1.6.5 X4 Pro 开始；不要刷到普通 X4、X3 或其他设备。
+- **只使用配套应用镜像，通过 SD 卡应用更新分两阶段安装。** 不要使用完整刷机包、`idf.py flash`，不要改 bootloader、分区表、NVS 或 eFuses。
+- **最终双系统不再保留 CrossPoint 槽。** Muse 恢复目标是准确固定的配套 CrossMux；普通 CrossMux Nightly 不能替代它。显示「恢复未验证」或切换失败时停止，不绕过校验。
 - 刷错型号、更新中断或破坏恢复槽后，可能需要磁吸 USB 适配器、官方工具或厂商协助；USB 锁定设备的恢复能力可能受限。**保留恢复槽不等于保证任何故障都能恢复。**
 - 公开镜像不含 token。个人打包镜像含有你的 SDK token，必须保密；不要上传 GitHub、分享给他人或附到问题报告。
 
@@ -21,13 +23,13 @@
 - 按屏幕宽度自动换行，不把 UTF-8 字符截断。
 - 默认简体中文菜单、配对与连接提示；名字和状态可以中英混排。
 - 内置中文字库，不需要先向 SD 卡安装字体。字体覆盖和限制见 [中文说明](docs/chinese.md)。
-- 保留原项目 CrossPoint 1.6.5 X4 Pro 的精确恢复校验。
+- 双系统版本精确验证配套 CrossMux；仍保留原 CrossPoint 1.6.5 X4 Pro 的精确摘要，用于旧环境与迁移阶段。
 
-**中文显示已由一台实际 X4 Pro 的使用者确认正常，GitHub CI 已通过。** 这不代表所有屏幕与硬件批次都已验证；中文版本的恢复往返与语言重启持久化尚未单独验收。详见 [验证记录](docs/chinese.md#验证)。
+2026-10-08，用户在一台国内版 X4 Pro 上确认专用 CrossMux 启动和双向切换正常。原 `0.1.4-zh` 中文显示已由用户确认。**`0.1.5-coexist-zh` 的 Muse 配对同步、中文阅读及换字体后的实际 Flash 槽摘要尚未单独确认**；不能把构建、主机测试或旧版显示结果扩大为新版本完整实机验收。详见 [共存说明](docs/crossmux-coexistence.md#验证范围) 和 [中文验证记录](docs/chinese.md#验证)。
 
 ## 界面预览
 
-以下由实际渲染代码在电脑上生成，使用示例名字与占位角色，并非实机照片。
+以下为 `0.1.4-zh` 的中文显示预览，由实际渲染代码在电脑上生成，使用示例名字与占位角色，并非实机照片。双系统版本的系统切换菜单显示 **切换到 CrossMux**。
 
 ![中文名字与混排状态](docs/images/chinese-main-preview.png)
 
@@ -35,29 +37,17 @@
 
 ## 适用设备
 
-只支持 **X4 Pro / ESP32-S3**，不支持普通 X4、X3。先安装官方 **CrossPoint 1.6.5 X4 Pro**，再使用它的 **SD Card Firmware Update** 安装 Muse Pocket 的应用镜像。
-
-不要用完整刷机包、改分区或把 CrossMux 覆盖到恢复槽。当前中文分支继续依赖准确版本的 CrossPoint；CrossMux 共存不在本次发布范围。
+只支持 **X4 Pro / ESP32-S3**，不支持普通 X4、X3。双系统安装完成后只有 CrossMux 和 Muse 两个系统。SD 字体和 PSRAM 字体路径仍可使用；专用配置禁用把另一应用槽用作字体 Flash 缓存，以保护 Muse。
 
 ## 安装
 
-1. 准备 Muse 手机 App，启用 Developer mode，自行创建 [Muse SDK token](https://gadgets.muse.ai/settings/sdk-tokens)。
-2. 按 [构建说明](docs/build.md) 使用 ESP-IDF 6.0.1 构建，或从本项目发布页下载无凭据应用镜像。
-3. 在本机终端运行打包工具。token 在隐藏提示中输入，不出现在命令参数里：
+按 [双系统逐步安装指南](docs/crossmux-coexistence.md#安装步骤) 操作：先在本机给已签署的公开 Muse 模板加入自己的 token；阶段 A 从原 CrossPoint 更新专用 CrossMux，确认启动；阶段 B 从 CrossMux 更新配套个人 Muse 镜像。每次上传后完整下载回读，核对大小与 SHA256，再进行设备上的 SD 更新。
 
-   ```sh
-   python3 esp32/tools/pocket/package_private.py muse-pocket-uncredentialed.bin muse-pocket-private.bin
-   ```
-
-4. 阅读器进入 File Transfer → Join Network，上传个人镜像到 SD 卡，下载回读比对大小和 SHA256。
-5. 退出文件传输，到 Settings → System → SD Card Firmware Update 选择个人镜像。
-6. Muse Pocket 启动后，右键打开设置，确认显示 **返回 CrossPoint**。如果显示 **恢复未验证**，停止配对并检查恢复固件，不要绕过校验。
-7. 在手机 Muse App 添加 MuseGadget…Pocket，阅读器左键确认，选 Wi-Fi 完成配对。
-8. 主界面与菜单默认中文；首次联网后等待 Muse 发送角色图和状态。
+发布文件与摘要以 [本版本发布页](https://github.com/Xi0ng8/muse-pocket-zh/releases/tag/v0.1.5-coexist-zh) 的清单为准，不能根据文件名推断是否配套。第一次使用 Muse 时启用手机 App 的 Developer mode，通过 Add gadget 配对并按阅读器左键确认。已配对设备先检查连接，排查时不要先重置配对。
 
 **个人打包镜像包含你的 token，不能上传 GitHub、分享给别人或附到问题报告。** 发布固件始终不包含 token，每个人必须本机打包自己的副本。
 
-完整按键、休眠和恢复步骤见 [安装指南](docs/install.md) 与 [使用指南](docs/usage.md)。
+完整按键见 [使用指南](docs/usage.md)，故障处理见 [双系统恢复与风险应对](docs/crossmux-recovery.md)。保留 CrossPoint 的旧版本安装见 [旧版安装指南](docs/install.md)。
 
 ## 让 Muse 发送中文状态
 
@@ -67,8 +57,10 @@
 
 ## 更新与恢复
 
-保留 CrossPoint 恢复槽。更新中文 Muse Pocket 前先通过 **返回 CrossPoint** 返回 CrossPoint，再使用 SD 卡应用更新流程。不要在 Muse Pocket 中安装别的系统覆盖恢复槽。
+CrossMux：**设置 → 系统 → 切换到中文 Muse**。Muse：右键打开设置，用右键选中 **切换到 CrossMux**，长按电源 **3 秒**。
+
+日常升级必须使用重新配套、签署的镜像。CrossMux 的普通 OTA 已禁用，SD 更新也只接受配套签署的 Muse；包括开机 DOWN 进入的 SD 恢复模式，**它也不能加载普通 CrossMux 文件来修复 CrossMux 自身**。两槽损坏时需要核实 USB 恢复条件与实际分区，不能假定自动回滚。操作前阅读 [恢复指南](docs/crossmux-recovery.md)。
 
 ## 许可证与贡献
 
-保留上游 [Apache-2.0](LICENSE) 和 [依赖声明](NOTICE)。内置 CJK 字形按其原字体的 SIL Open Font License 1.1 分发，具体许可证见字体目录。欢迎提交中文排版与显示问题；报告不要包含凭据或个人安装包。
+Muse 源自 [Federico Viticci 的 Muse Pocket](https://github.com/viticci/muse-pocket)，保留上游 [Apache-2.0](LICENSE) 和 [依赖声明](NOTICE)。CrossMux 的来源与许可证随配套源码分发，见 [共存说明](docs/crossmux-coexistence.md#来源与许可证)。内置 CJK 字形按 SIL Open Font License 1.1 分发，见 [字体声明](esp32/main/fonts/README.md)。欢迎反馈问题；报告不要包含凭据、私钥或个人安装包。

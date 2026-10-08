@@ -6,6 +6,7 @@ extern "C" {
 // Call before storage/network initialization so recovery works without either.
 void pocket_boot_guard(void);
 bool pocket_recovery_available(void);
+bool pocket_recovery_is_crossmux(void);
 bool pocket_return_to_crosspoint(void);
 // Local OTA health: initialized controls, first panel refresh, verified recovery.
 bool pocket_local_boot_ready(void);

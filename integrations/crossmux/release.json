@@ -1,0 +1,31 @@
+{
+  "release": "v0.1.5-coexist-zh",
+  "status": "experimental-prerelease",
+  "device": "xteink_x4_pro",
+  "images": {
+    "crossmux-x4pro-coexist-1.6.5.bin": {
+      "bytes": 6253120,
+      "sha256": "cb6ba7fd9c8b0c3db40eba7a6491d34f1108d77db890e1b634cf7be610e43a67"
+    },
+    "muse-pocket-zh-0.1.5-coexist-uncredentialed.bin": {
+      "bytes": 2146464,
+      "sha256": "0aa733a020e0e9811b706b68331b99e4a22649ed9844c7fff75a1d66730ce257"
+    }
+  },
+  "verified": {
+    "firmware_builds": true,
+    "host_tests": 24,
+    "cppcheck_changed_runtime_files": 5,
+    "sd_full_readback": true,
+    "crossmux_boot": "user-confirmed",
+    "two_way_switching": "user-confirmed"
+  },
+  "not_verified": [
+    "Muse 0.1.5 pairing/sync separately",
+    "Chinese reading/font changes and subsequent physical slot hashes",
+    "USB recovery on this device",
+    "power-loss recovery"
+  ],
+  "credentials": "Public Muse image contains empty SDK token slot; personalize locally with package_private.py",
+  "compatibility": "Use the paired app images; preserve device bootloader, partitions, NVS and eFuses"
+}

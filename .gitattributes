@@ -1,0 +1,2 @@
+# Unified patches contain required space-prefixed empty context lines.
+integrations/crossmux/*.patch -whitespace

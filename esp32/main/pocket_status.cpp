@@ -224,7 +224,11 @@ void compose() {
         snprintf(rows[3],64,chinese?"方向：%s":"Orientation: %s",flipped?(chinese?"翻转":"flipped"):(chinese?"正常":"normal"));
         snprintf(rows[4],64,"%s",chinese?"语言：简体中文":"Language: English");
         snprintf(rows[5],64,"%s",chinese?"睡眠":"Sleep");
-        snprintf(rows[6],64,"%s",recovery?(chinese?"返回 CrossPoint":"Return to CrossPoint"):(chinese?"恢复未验证":"CrossPoint not verified"));
+        const bool mux=pocket_recovery_is_crossmux();
+        snprintf(rows[6],64,"%s",recovery?
+            (mux?(chinese?"切换到 CrossMux":"Switch to CrossMux"):
+                 (chinese?"返回 CrossPoint":"Return to CrossPoint")):
+            (chinese?"恢复未验证":"Reader not verified"));
         snprintf(rows[7],64,"%s",chinese?"回到 Muse":"Back to Muse");
         for(int i=0;i<MENU_ROWS;++i) {
             if(i==selected) {rect(14,MENU_TOP+i*MENU_STEP,W-28,3,0);rect(14,MENU_TOP+54+i*MENU_STEP,W-28,3,0);text(">",22,MENU_TOP+16+i*MENU_STEP,3);}

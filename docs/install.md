@@ -1,4 +1,6 @@
-# 安装、配对与恢复
+# 旧版 CrossPoint 环境安装、配对与恢复
+
+**本页仅适用于 `v0.1.4-zh` 及保留 CrossPoint 1.6.5 的旧版环境。** 当前 `v0.1.5-coexist-zh` 实验预发布是 CrossMux + 中文 Muse 双系统，安装请按 [分阶段共存指南](crossmux-coexistence.md)，故障应对见 [双系统恢复指南](crossmux-recovery.md)。不要将本页的 CrossPoint 槽保留要求套用到双系统迁移后的布局。
 
 只适用于 **Xteink / 阅星瞳 X4 Pro**。先通过 [CrossPoint 官方工具](https://crosspointreader.com) 安装准确的 **CrossPoint 1.6.5 X4 Pro**。更新时保持电量充足。
 
@@ -55,4 +57,4 @@ CrossPoint 的 SD 更新写入非活动应用槽，保留自身在另一个槽�
 
 更新或重装 Muse Pocket 时，先返回 CrossPoint，再重复 SD 更新。不要通过 Muse Pocket 写别的系统到恢复槽；远程 OTA 已禁用。
 
-这里保留的是 CrossPoint，不是原厂 XTOS。恢复到 XTOS 需遵循厂商或 CrossPoint 官方指导，硬件恢复可能需要磁吸 USB 适配器。CrossMux 与中文 Muse 共存不在本次版本范围。
+这里保留的是 CrossPoint，不是原厂 XTOS。恢复到 XTOS 需遵循厂商或 CrossPoint 官方指导，硬件恢复可能需要磁吸 USB 适配器。升级到 CrossMux + 中文 Muse 后不再保留 CrossPoint 槽，必须改用 [双系统恢复指南](crossmux-recovery.md)。

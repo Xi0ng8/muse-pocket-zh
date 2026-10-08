@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/0x1abin/crossmux",
+  "commit": "1512e8e049f2b1a4efc7c004a5b1a93cbc5e3f9f",
+  "sdk_commit": "96de1be6ce08eb732909e6e8149af8f892b9a2c5",
+  "profile": "x4pro_coexist",
+  "patch_sha256": "5a313a4e8b30fa5a68279690bfa72f081a8815d768c6e6b1e38cb70c05eb01d3",
+  "changed_files": {
+    "lib/I18n/translations/chinese.yaml": "d95ad31f7e3d4be38653570e2590c8c59c6a2974f24723047b1a6051b509bbf8",
+    "lib/I18n/translations/english.yaml": "2844d70991edd508ca111889bb2f82f569df9d678b5b60819177b719cf4851c0",
+    "lib/hal/HalMuseCoexist.cpp": "1e1d9d63a633bd9775dd3f32edbed282b540496b970d68851c4b68e19b6adcc4",
+    "lib/hal/HalMuseCoexist.h": "a4a58ed6a887aab92ed866c163b8025d41c479689463566aae8f8ccc618bf799",
+    "lib/hal/HalOtaSlot.cpp": "190c371d1ebc599645b15cf90edb403552bf7639af8c541cd1ed9f2fc802d6d9",
+    "lib/hal/MuseCoexistPublicKey.h": "2f87231cfed7083fc7ec952a225214724a9ee726bfabdffc8c18235c4b96a576",
+    "platformio.ini": "96d9925045e1f56fb75c0a5868fd7adec5325d64e04c90e206a6b28a5dbd6582",
+    "scripts/tests/test_muse_coexist.py": "2d6dee6ade959034b85139f26cf51980f60ad7861507b45950803b79be6711d4",
+    "scripts/tests/test_muse_coexist_guards.py": "c02408914f61dca734d78ea69c4d825570a9ff9f862aec588b8f7b9effeab606",
+    "src/activities/boot_sleep/BootActivity.cpp": "10af65d3c01f99e50ce27b23fe64ad341418f22a039937e729617fc420b44ef0",
+    "src/activities/settings/SettingsActivity.cpp": "0fbdca8a17cb8e6aef5f03dc2890707d0984a459abd4c003f9c961137d64bd58",
+    "src/activities/settings/SettingsActivity.h": "97d206e709772028c0e1eab68b5bec5a66dfdeece0750463fb9b8001b367f3ca",
+    "src/activities/settings/TextSettingsActivity.cpp": "df93932b0369bc3c3ce40d1639c48b569c5fa89f50897c81c41c66f22e68b4d3",
+    "src/network/FirmwareFlasher.cpp": "1702599aadc473839898699fe4f9e19ecee8db1c59ec77f687ff0c6677dbbfc8",
+    "src/network/OtaUpdater.cpp": "579a615cee0a97d081376febcd90f73baa3ea65a8f8463f2009dfadc5ecc920c",
+    "src/platform/coexist_nvs_guard.cpp": "47f896cf955729037fd5b6506edb37640787f58225a02f2dbb685a85d4250bfc"
+  },
+  "license": "MIT; see LICENSE.upstream",
+  "excluded": "unrelated local freeink-sdk modifications are not part of this patch"
+}

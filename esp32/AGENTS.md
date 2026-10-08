@@ -27,8 +27,9 @@ token only afterward with the private packager; never put it in `sdkconfig`.
 
 Install through CrossPoint's **Settings → System → SD Card Firmware Update**,
 using only the application image. **Never run `idf.py flash` for this reader.**
-It would overwrite the bootloader and partition table. Keep the pinned CrossPoint
-1.6.5 X4 Pro image in the other slot, and leave remote Muse OTA disabled.
+It would overwrite the bootloader and partition table. Keep the exact pinned reader image in the other slot: CrossPoint 1.6.5 for the
+legacy release, protected CrossMux for 0.1.5 coexistence. Leave remote Muse OTA
+disabled. See ../docs/crossmux-coexistence.md for the two-stage migration.
 
 Read [build](../docs/build.md), [install/recovery](../docs/install.md) and
 [commands](../docs/usage.md) as needed. The retained SDK tools for other boards

@@ -30,9 +30,9 @@ screen. Upload only the private application image and verify a full download
 readback by size and SHA256. Reuse an exact matching file; stop on an unknown
 existing file instead of overwriting it. Upload success is not flash success.
 
-Use CrossPoint's **SD Card Firmware Update** into the inactive slot. Never run
+Use the installed reader's **SD Card Firmware Update** into the inactive slot; the dedicated CrossMux updater accepts only its signed paired Muse image. Never run
 `idf.py flash` or write a bootloader, partition table, merged image or eFuses on
-this reader. Keep the pinned CrossPoint 1.6.5 X4 Pro image in the other slot.
+this reader. Use the pinned CrossPoint peer only for the legacy version. For CrossMux coexistence, follow docs/crossmux-coexistence.md and docs/crossmux-recovery.md: preserve the exact protected CrossMux peer, use the signed paired Muse template, and keep both systems bound to their complete image checks.
 Firmware update selection and pairing confirmation require physical button taps;
 request those when remote access cannot perform them.
 

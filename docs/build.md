@@ -2,6 +2,8 @@
 
 本项目使用 **ESP-IDF 6.0.1**，目标为 **ESP32-S3 / X4 Pro**。支持 macOS、Linux 或 Windows WSL。不要使用普通 X4/X3 固件。
 
+**双系统 `v0.1.5-coexist-zh` 需要专用 CrossMux、准确镜像 pin 和已签署 Muse 模板。** 普通本地构建不能直接替代配套已签署发布文件。普通用户请按 [共存安装指南](crossmux-coexistence.md) 下载公开模板并本机打包；开发者的构建、pin 与签署边界见 [配套构建说明](../integrations/crossmux/README.md)。下面说明 Muse 源码构建和通用个人打包工具。
+
 ## 构建
 
 先按 [Espressif 官方说明](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/get-started/index.html) 安装 ESP-IDF 6.0.1 和 ESP32-S3 工具。工具链放在仓库外。
@@ -45,4 +47,4 @@ python -m esptool --chip esp32s3 image-info artifacts/muse-pocket-zh-private.bin
 
 如果 idf.py 不存在，先激活环境；如果版本不对，使用 6.0.1。请使用 Pocket 的 build.sh，而非 SDK 默认板型。字体数据已随源码提供，普通构建不需安装字体生成依赖，重新生成字库的要求见 `tools/fonts/`。
 
-**不要运行 idf.py flash，不要写 bootloader、分区表或 eFuses。** 本项目通过 CrossPoint 的 SD 卡应用更新安装。
+**不要运行 idf.py flash，不要写 bootloader、分区表、NVS 或 eFuses。** 旧 `v0.1.4-zh` 使用 CrossPoint 的 SD 应用更新；双系统版本按 [阶段 A / B](crossmux-coexistence.md#安装步骤) 使用原 CrossPoint 与专用 CrossMux 的 SD 应用更新。

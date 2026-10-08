@@ -12,13 +12,14 @@ Read [README.md](README.md), then the guide relevant to the task:
 - [Commands and behavior](docs/usage.md).
 - [Contributing and verification](CONTRIBUTING.md).
 - [Reusable agent skill](skills/muse-pocket/SKILL.md).
+- [CrossMux coexistence](docs/crossmux-coexistence.md) and [recovery](docs/crossmux-recovery.md).
 
 ## Source map
 
 | Path | Purpose |
 | --- | --- |
 | `esp32/main/pocket_status.cpp` | Portrait UI, caption wrapping, settings and buttons |
-| `esp32/main/pocket_recovery.c` | Check and boot the preserved CrossPoint image |
+| `esp32/main/pocket_recovery.c` | Check and boot exact pinned CrossPoint or protected CrossMux images |
 | `esp32/main/pocket_token.c` | Reserved token field patched only in private output |
 | `esp32/main/app.c` | Startup, boot confirmation and custom command handlers |
 | `esp32/main/noise_control.cpp` | Paired Muse protocol, command registration, identity and setup request |
@@ -38,11 +39,12 @@ Read [README.md](README.md), then the guide relevant to the task:
 - Packaged `.bin` files contain credentials. Keep them local. Source and normal
   builds stay uncredentialed; do not publish generated config or build folders.
 - **Never use `idf.py flash`, a merged image or full-flash arguments on this
-  reader.** Use CrossPoint's app-only SD updater. Leave the bootloader, partition
+  reader.** Use the current reader's app-only SD updater; the dedicated CrossMux profile accepts only signed paired Muse images. Leave the bootloader, partition
   table, eFuses, stock calibration and pairing storage alone.
-- Keep the exact CrossPoint 1.6.5 X4 Pro image in the other firmware slot. Boot
-  confirmation requires controls, a completed panel refresh and that image's
-  pinned digest. Do not weaken the check or confirm boot merely because Muse
+- Legacy 0.1.4 uses exact CrossPoint 1.6.5 X4 Pro recovery. The 0.1.5 coexistence
+  build uses the exact protected CrossMux image pinned in pocket_crossmux_pin.h;
+  the two installed systems are CrossMux and Muse. Boot confirmation requires
+  controls, a completed panel refresh and an exact pinned peer digest. Do not weaken the check or confirm boot merely because Muse
   connected. Remote Muse OTA stays disabled.
 - The renderer owns the panel bus. Finish or fail an image transfer without
   corrupting the previous displayed character; wait for a completed frame before
@@ -54,7 +56,7 @@ Read [README.md](README.md), then the guide relevant to the task:
 
 Before transferring, confirm the user's actual X4 Pro and the URL displayed by
 its File Transfer screen. `GET /api/status` should identify `xteink_x4_pro` and
-CrossPoint `1.6.5`. Do not assume an IP, hostname, SSID, computer or account.
+the firmware corresponding to the requested installation stage. Do not assume an IP, hostname, SSID, computer or account.
 
 CrossPoint's APIs for this version are:
 
