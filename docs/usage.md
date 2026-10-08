@@ -1,88 +1,49 @@
-# Display, settings and Muse commands
+# 中文界面、按键与 Muse 命令
 
-Muse Pocket is a companion screen. It receives a character image and caption
-through the Muse Gadget SDK's paired connection; it does not expose a public web
-API or poll a separate activity feed.
+Muse Pocket 是 Muse 的随身显示屏，接收配对连接发送的角色图与状态，不提供公开网页 API，也不会独立订阅活动流。
 
-## Settings and controls
+## 按键
 
-Press **Right** on the main screen to open Settings, then press Right to move
-through the rows. Press **Power** to change the selected setting.
+- 主屏右键：打开设置；设置中右键：选择下一项。
+- 设置中电源键：修改当前项。
+- 主屏电源短按：完整刷新；长按 3 秒：休眠；电源键唤醒。
+- 左键：确认配对或重试设置；双击左键：重新扫描 Wi-Fi。
+- 长按左键 5 秒：重置 Muse 设置并忘记 Wi-Fi，排查普通显示问题时不要先做这个操作。
 
-| Setting | Choices |
-| --- | --- |
-| Brightness | Frontlight percentage |
-| Warmth | Cool/warm balance |
-| Refresh | 2, 5, 15 or 30 seconds |
-| Orientation | Normal or flipped |
-| Sleep | Preserve the ink and stop live updates |
-| Return to CrossPoint | Hold Power for 3 seconds to return |
-| Back to Muse | Return to the companion screen |
+设置提供亮度、色温、刷新间隔（2/5/15/30 秒）、方向、语言、休眠、返回 CrossPoint 和返回 Muse。语言默认简体中文；显示设置存入单独的 `muse_pocket` 区域。
 
-Brightness, warmth, refresh and orientation are saved in the separate
-`muse_pocket` settings area. Power wakes a sleeping reader. On the main screen,
-Power performs a clean refresh; holding it for 3 seconds sleeps the device.
-Left confirms pairing or retries setup. Double-tapping Left rescans Wi-Fi;
-holding it for 5 seconds resets Muse setup and forgets its Wi-Fi credentials.
+状态按选定间隔批量刷新，图像更改使用完整刷新；累计十次局部更新后也会完整刷新。
 
-Captions are batched according to the refresh setting. Image changes use a full
-refresh; the display also performs a full refresh after ten incremental updates.
+## Muse 可调用的命令
 
-## Commands your Muse can call
-
-| Command | Parameters | Result |
+| 命令 | 参数 | 行为 |
 | --- | --- | --- |
-| `display.draw_url` | `url`, optional `row` | Draw an image; keep the caption |
-| `pocket.set_status` | `text`, up to 240 UTF-8 bytes | Set the caption below the character |
-| `pocket.set_frontlight` | `brightness`, `warmth`, both 0–100 | Change and save the frontlight |
-| `display.show_animation` | None | Return to the neutral placeholder icon |
+| `display.draw_url` | `url`，可选 `row` | 显示角色图，保留状态 |
+| `pocket.set_status` | `text`，最多 240 UTF-8 字节 | 修改角色图下方状态 |
+| `pocket.set_frontlight` | `brightness`、`warmth`，0–100 | 修改并保存前光 |
+| `display.show_animation` | 无 | 返回中性占位图 |
 
-Use a **baseline JPEG** prepared for the **480×480 character canvas**, or
-big-endian RGB565 data. Gray is converted to black and white with dithering.
-An incomplete image download leaves the previous character visible.
-Captions show up to four lines of 35 ASCII characters each. Longer text can be
-accepted up to the byte limit, but only the visible lines are drawn. Keep status
-updates short and use plain ASCII; accented letters and emoji become `?`.
+图片使用适合 **480×480** 角色区域的 **baseline JPEG**，或大端 RGB565 原始数据。图片以黑白抖动显示，下载不完整时保留旧角色图。
 
-Example command parameters:
+名字和状态支持中文与 ASCII 混排，状态按像素宽度换行，最多显示四行。字节上限不等于中文字数；换行和截断保持完整 UTF-8 字符。未覆盖的生僻字、其他文字与 emoji 使用替代字形。
 
 ```json
-{"text": "Reading your notes.\nNext: drafting a reply."}
+{"text":"正在整理笔记。\n接下来：起草回复。"}
 ```
 
-```json
-{"brightness": 25, "warmth": 50}
-```
+## 自动初始化
 
-## Automatic character and status setup
+配对连接注册后，固件向 Muse 主聊天发送一次请求，要求它发送自己的角色图，并在实际活动变化时调用状态命令。普通重连不重复发送，重启后会再次请求，因为角色图只保存在内存。
 
-After the paired session registers, the firmware sends one message to the Muse's
-main chat, using the SDK's `/chat/stream` protocol. It asks the Muse to send its
-own character through `display.draw_url` and update `pocket.set_status` when its
-activity changes. A successfully accepted request is remembered for that boot
-and Muse, so ordinary reconnects do not repeat it. Restarting asks again because
-the current character is held in memory.
+这是请求，不保证 Muse 每次活动都主动更新；命令必须由 Muse 实际执行。
 
-This is a request to the Muse, not a guaranteed activity subscription. The Muse
-must execute the display commands and decide when its activity has changed.
+## 排查
 
-## Troubleshooting
+- 已连接但没有角色图：请求 Muse 调用 `display.draw_url` 发送 480×480 baseline JPEG，再调用 `pocket.set_status` 发送中文状态，并报告每个命令的结果。
+- 名字仍为 Muse Pocket：身份请求尚未返回，检查 Muse 连接并等待重连。
+- 状态不变：确认 Muse 是否实际调用新的状态命令。
+- 重连中：检查 Wi-Fi 和 Muse 服务；普通重连保留旧图与状态。
+- 恢复固件未验证：按 [恢复指南](install.md) 检查，不绕过摘要校验。
+- 屏幕空白或卡住：尝试开机按住右键返回已核验 CrossPoint，不盲目改硬件引脚或刷其他型号。
 
-- **Connected, but no character:** ask your Muse to send its own character as a
-  480×480 baseline JPEG using `display.draw_url`, then set the current activity
-  with `pocket.set_status`. Ask it to tell you if either command fails.
-- **Name still says Muse Pocket:** the paired identity request has not returned.
-  Check the Muse connection and wait for reconnect.
-- **Caption stopped changing:** the Muse must send a new status command. It is
-  not a timer that invents new activities.
-- **Reconnecting:** check the chosen Wi-Fi network and the Muse service. Your
-  previous image and caption remain visible during ordinary reconnects.
-- **CrossPoint not verified:** follow the [recovery guide](install.md); do not
-  weaken the pinned-image check to make the warning disappear.
-- **Screen is blank or stuck:** the driver stops after an inconclusive panel
-  probe or a busy timeout. Try the held-Right startup recovery path. Do not
-  blindly flash a different model's pin map or partition table.
-
-For a bug report, include the X4 Pro panel variant if known, source version, what
-you pressed and a photo of the screen. Review logs before sharing. Never attach
-a private `.bin`, SDK token, device token, Wi-Fi password or generated `sdkconfig`.
+中文覆盖、许可证和实机验证限制见 [中文说明](chinese.md)。反馈问题时可提供操作步骤、版本与屏幕照片；不要附个人安装包、SDK token、设备 token、Wi-Fi 密码或 sdkconfig。

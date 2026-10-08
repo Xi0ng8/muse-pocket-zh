@@ -1192,7 +1192,8 @@ static bool pocket_intro_request(esp_tls_t* tls, ClientSession& session,
         "Initialize Muse Pocket as my companion display. Send your own "
         "character image using display.draw_url, as a baseline JPEG in the 480x480 "
         "character canvas. Keep the character visible and set the caption with "
-        "pocket.set_status to your current activity. Use short plain ASCII text. "
+        "pocket.set_status to your current activity. Use short text in my preferred "
+        "language; Chinese and ASCII are supported, but emoji are not. "
         "Keep the caption current on meaningful activity changes. If already set "
         "up, refresh the character and current status. Tell me if a command fails.");
     char* json=cJSON_PrintUnformatted(root);cJSON_Delete(root);
@@ -1416,7 +1417,7 @@ static char *build_register_json(void) {
 
 #if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
     cJSON* status_required=cJSON_CreateObject();
-    cJSON_AddItemToObject(status_required,"text",string_param("Current activity or status, up to 240 UTF-8 bytes. Use plain ASCII for this pixel font."));
+    cJSON_AddItemToObject(status_required,"text",string_param("Current activity or status, up to 240 UTF-8 bytes. Chinese and ASCII text are supported; emoji and unsupported characters use a replacement glyph. Keep text short to fit four lines."));
     add_command(commands,"pocket.set_status","Update the caption below the character. The character remains visible. Send meaningful updates; the device batches screen refreshes.",status_required,nullptr);
     cJSON* light_required=cJSON_CreateObject();
     for(const char* key : {"brightness", "warmth"}) {

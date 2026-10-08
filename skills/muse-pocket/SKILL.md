@@ -47,6 +47,6 @@ remote OTA to bypass an update problem.
 Read `docs/usage.md`. A connected transport does not prove Muse sent an image or
 caption. Check the paired identity, the Muse's command results and the image
 format. Use `display.draw_url` for a 480×480 baseline JPEG and `pocket.set_status`
-for short ASCII text; a previous image must survive a failed download. The startup
+for short Chinese or ASCII text; a previous image must survive a failed download. The startup
 chat request asks Muse to keep the status current, but it is not an independent
 activity subscription. Do not reset pairing as a first response to a UI problem.

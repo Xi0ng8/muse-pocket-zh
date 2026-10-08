@@ -1,0 +1,102 @@
+{
+  "source_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+  "source_sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+  "versions": {
+    "Pillow": "10.4.0",
+    "fontTools": "4.59.1",
+    "FreeType": "2.13.2"
+  },
+  "ranges": [
+    [
+      "U+2010",
+      "U+2027"
+    ],
+    [
+      "U+3000",
+      "U+303F"
+    ],
+    [
+      "U+4E00",
+      "U+9FFF"
+    ],
+    [
+      "U+FF00",
+      "U+FFEF"
+    ]
+  ],
+  "glyph_count": 21284,
+  "bitmap_bytes": 681088,
+  "index_bytes": 42568,
+  "bitmap_sha256": "5734b6ecb38023edaf091418f3cb98609762cf295e55f023770e8b8d26662882",
+  "blank_codepoints": [
+    "U+3000",
+    "U+FFA0"
+  ],
+  "missing_codepoints": [
+    "U+2017",
+    "U+201B",
+    "U+201F",
+    "U+2023",
+    "U+2024",
+    "U+9FF0",
+    "U+9FF1",
+    "U+9FF2",
+    "U+9FF3",
+    "U+9FF4",
+    "U+9FF5",
+    "U+9FF6",
+    "U+9FF7",
+    "U+9FF8",
+    "U+9FF9",
+    "U+9FFA",
+    "U+9FFB",
+    "U+9FFC",
+    "U+9FFD",
+    "U+9FFE",
+    "U+9FFF",
+    "U+FF00",
+    "U+FFBF",
+    "U+FFC0",
+    "U+FFC1",
+    "U+FFC8",
+    "U+FFC9",
+    "U+FFD0",
+    "U+FFD1",
+    "U+FFD8",
+    "U+FFD9",
+    "U+FFDD",
+    "U+FFDE",
+    "U+FFDF",
+    "U+FFE7",
+    "U+FFEF"
+  ],
+  "adjusted_count": 14,
+  "adjusted_codepoints": [
+    "U+302A",
+    "U+302B",
+    "U+302C",
+    "U+302D",
+    "U+3031",
+    "U+3032",
+    "U+FF3E",
+    "U+FF40",
+    "U+FF47",
+    "U+FF4A",
+    "U+FF50",
+    "U+FF51",
+    "U+FF59",
+    "U+FFE8"
+  ],
+  "parameters": {
+    "font_size": 15,
+    "cell": [
+      16,
+      16
+    ],
+    "baseline": 13,
+    "threshold": 96,
+    "layout": "BASIC",
+    "packing": "row-major MSB-first",
+    "fit": "clamp ink; nearest shrink only oversized glyphs"
+  }
+}

@@ -1,79 +1,47 @@
-# Install, pair and recover
+# 安装、配对与恢复
 
-This guide is for the **Xteink X4 Pro**, with **CrossPoint 1.6.5 for X4 Pro**
-installed first. The X4 and X3 are different devices. Get CrossPoint and its
-current installation instructions from the [official installer](https://crosspointreader.com).
-The project's cable-free initial installation was tested through the official
-Xteink Unlocker on macOS, starting from stock XT V7.4.4.
+只适用于 **Xteink / 阅星瞳 X4 Pro**。先通过 [CrossPoint 官方工具](https://crosspointreader.com) 安装准确的 **CrossPoint 1.6.5 X4 Pro**。更新时保持电量充足。
 
-Keep the reader charged during updates. Use the [private app image you built](build.md),
-not a bootloader, partition table, merged flash image or someone else's binary.
+## 上传个人镜像
 
-## Copy the file to microSD
+1. 按 [构建与打包](build.md) 生成含自己 token 的个人应用镜像。
+2. 阅读器打开 **File Transfer → Join Network**，连接电脑可访问的 Wi-Fi。
+3. 打开阅读器屏幕显示的实际网址，将个人 `.bin` 上传到 SD 卡根目录。
+4. 下载完整文件，核对大小和 SHA256 与本机一致。同名文件未知或内容不一致时不要覆盖，改用新文件名。
 
-Either copy the private `.bin` directly onto the microSD card, or use CrossPoint:
+代理使用 `/api/status` 确认 `xteink_x4_pro` 和 `1.6.5`，使用 `/api/files?path=/` 检查同名、`POST /upload?path=/` 的 `file` 表单字段上传，再 `GET /download?path=/FILENAME` 完整回读。上传成功不等于刷写成功。
 
-1. Open **File Transfer → Join Network** on the reader.
-2. Join a Wi-Fi network your computer can also reach.
-3. Open the URL shown on the reader in your browser. Use that actual address;
-   it changes between networks and devices.
-4. Upload your private `.bin` into the card's root directory.
-5. Download it back and compare its size and SHA256 with the packager's output.
+## SD 卡更新
 
-For agents using the file-transfer API, see [AGENTS.md](../AGENTS.md). Do not
-overwrite an existing file unless you know what it is; use a new name instead.
+1. 退出 File Transfer。
+2. 进入 **Settings → System → SD Card Firmware Update**。
+3. 选择已核验的准确个人镜像文件，确认并等待完成，不要断电。
+4. Muse Pocket 启动后按右键进入设置，确认显示 **返回 CrossPoint**（英文模式是 Return to CrossPoint）。
 
-## Install from the reader
+如果显示 **恢复未验证**，停止并检查恢复版本与构建，不要绕过校验。首次启动未能通过本地启动检查时，系统可能在五分钟后返回 CrossPoint；正常配对没有五分钟时限。
 
-1. Leave File Transfer.
-2. Open **Settings → System → SD Card Firmware Update**.
-3. Select the exact private `.bin` you just verified and confirm.
-4. Let the update finish without turning the reader off.
+CrossPoint 的 SD 更新写入非活动应用槽，保留自身在另一个槽；不改 bootloader、分区表、eFuses 或配对存储。仅使用应用镜像，不使用完整刷机包。
 
-CrossPoint writes the inactive firmware slot. Its own application stays in the
-other slot. Muse Pocket does not replace the reader's bootloader or partition
-table, and it keeps existing pairing and Wi-Fi storage.
+## Muse 配对
 
-On first boot, press **Right** to open Muse Pocket Settings. The recovery row
-should say **Return to CrossPoint**. If it says **CrossPoint not verified**, stop
-and check the installed version and build: this firmware deliberately confirms
-only the exact official CrossPoint 1.6.5 X4 Pro image. Do not bypass the check.
-A new image whose local startup check fails can return to CrossPoint after five
-minutes. Initial Muse pairing does not need to finish within that time.
+1. 手机 Muse App 的设备设置中启用 **Developer mode**。
+2. 点 **Add gadget**，选择名字带 **MuseGadget…Pocket** 的设备。
+3. 阅读社区设备访问说明，确认只配对可信固件。
+4. 阅读器出现提示时按左键确认。
+5. 手机选择 Wi-Fi，完成连接。
 
-## Pair with your Muse
+连接后固件会请求 Muse 发送角色图与状态。如果仍是占位图，见 [使用说明](usage.md)。固件更新保留已有配对与 Wi-Fi，正常更新无需重置。
 
-1. Open the Muse app and enable **Developer mode** in its device settings.
-2. Use **Add gadget** and select the reader's `MuseGadget…Pocket` advertisement.
-3. Follow the app's community-device pairing flow. Review the access it grants
-   to the device; pair only firmware you trust.
-4. When the reader asks, press **Left** to confirm the physical device.
-5. Select your Wi-Fi network and complete setup.
+## 返回 CrossPoint
 
-Once connected, the name comes from your paired Muse. The reader asks that Muse
-to send its character and a status caption. If only the neutral icon appears,
-see [display troubleshooting](usage.md#troubleshooting).
+设置中选 **返回 CrossPoint**，长按电源 **3 秒**。开机恢复路径是启动时按住 **右键**至少 **1.2 秒**，它在 Muse 网络和屏幕初始化前执行。
 
-## Return to CrossPoint
+恢复只认可另一个槽内以下准确固件：
 
-In Muse Pocket Settings, select **Return to CrossPoint** and hold **Power for
-3 seconds**. For the startup recovery path, hold **Right while starting** the
-reader; keep it held for at least 1.2 seconds.
+- CrossPoint 1.6.5，X4 Pro。
+- 大小 `5632640` 字节。
+- SHA256 `9ebd6ef1e0bb39ff8dcbff3947f938cb6158a1bcb1769d3811cb8bc6c6667eab`。
 
-Recovery checks the other firmware slot against this exact official image:
+更新或重装 Muse Pocket 时，先返回 CrossPoint，再重复 SD 更新。不要通过 Muse Pocket 写别的系统到恢复槽；远程 OTA 已禁用。
 
-- Version: CrossPoint 1.6.5, X4 Pro.
-- Length: `5632640` bytes.
-- SHA256: `9ebd6ef1e0bb39ff8dcbff3947f938cb6158a1bcb1769d3811cb8bc6c6667eab`.
-
-It does not rely on a generic application name or switch to an unknown slot.
-The startup path runs before Muse's network, storage and display setup, so it can
-work when those fail. It still needs the pinned CrossPoint image to be present.
-
-To update or reinstall Muse Pocket later, return to CrossPoint and repeat the
-SD-card process. **Do not install another firmware over the recovery slot from
-inside Muse Pocket.** Its remote firmware updater is disabled for this reason.
-
-The return path preserves CrossPoint, not a separate backup of the factory Xteink
-firmware. Use official Xteink/CrossPoint recovery instructions if you need stock
-firmware again. Hardware recovery may require the magnetic USB adapter.
+这里保留的是 CrossPoint，不是原厂 XTOS。恢复到 XTOS 需遵循厂商或 CrossPoint 官方指导，硬件恢复可能需要磁吸 USB 适配器。CrossMux 与中文 Muse 共存不在本次版本范围。

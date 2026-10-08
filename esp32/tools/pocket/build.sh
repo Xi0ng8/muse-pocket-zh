@@ -20,5 +20,5 @@ if [[ "$(idf.py --version)" != *"v6.0.1"* ]]; then
 fi
 cd "$pocket_root/esp32"
 idf.py -B build-xteink-s3 -D SDKCONFIG=build-xteink-s3/sdkconfig \
-    -D IDF_TARGET=esp32s3 -D PROJECT_VER=0.1.3-pocket \
+    -D IDF_TARGET=esp32s3 -D PROJECT_VER=0.1.4-zh \
     -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;devices/sdkconfig.xteink-x4-pro' build

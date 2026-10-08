@@ -1,6 +1,8 @@
 // Muse Pocket: portrait e-paper UI and physical controls for the X4 Pro.
 #include "sdkconfig.h"
 #include "pocket.h"
+#include "pocket_text.h"
+#include "pocket_cjk_font.h"
 #include "BoardConfig.h"
 #include "XteinkDetect.h"
 #include "driver/Ssd1677Driver.h"
@@ -34,26 +36,28 @@ TaskHandle_t renderer;
 uint8_t *canvas, *avatar, *staging, *frame, *shown;
 bool custom_avatar=false, custom_status=false, loading=false, menu=false, flipped=false, sleeping=false;
 bool recovery=false, force_full=true, initialized=false;
+bool chinese=true;
+constexpr int MENU_ROWS=8, MENU_TOP=156, MENU_STEP=62, RECOVERY_ROW=6;
 int selected=0, brightness=25, warmth=50, cadence=5, refreshes=0, battery=-1;
 int64_t last_status_us=0, last_draw_us=0;
 uint32_t requested_frame=0, finished_frame=0;
 led_state_t state=LED_STATE_BOOT;
-char title[64]="Muse Pocket", status[241]="Pair with Muse to get started";
+char title[64]="Muse Pocket", status[241]={};
 i2c_master_bus_handle_t i2c_bus;
 i2c_master_dev_handle_t touch, gauge;
 const int cadences[]={2,5,15,30};
 
 const char* connection(led_state_t s) {
     switch(s) {
-    case LED_STATE_SETUP_IDLE: case LED_STATE_BLE_ADVERTISING: return "Open Muse > Add gadget";
-    case LED_STATE_BLE_CONNECTED: return "Phone connected";
-    case LED_STATE_PAIRING_CONFIRM_REQUIRED: return "Press LEFT to confirm";
-    case LED_STATE_WS_CONNECTED: return "Connected to Muse";
-    case LED_STATE_WS_DISCONNECTED: return "Reconnecting";
-    case LED_STATE_UNPAIRED: return "Pairing required";
-    case LED_STATE_ERROR: return "Connection error";
-    case LED_STATE_WIFI_CONNECTING: return "Joining Wi-Fi";
-    default: return "Connecting";
+    case LED_STATE_SETUP_IDLE: case LED_STATE_BLE_ADVERTISING: return chinese?"打开 Muse > 添加设备":"Open Muse > Add gadget";
+    case LED_STATE_BLE_CONNECTED: return chinese?"手机已连接":"Phone connected";
+    case LED_STATE_PAIRING_CONFIRM_REQUIRED: return chinese?"按左键确认":"Press LEFT to confirm";
+    case LED_STATE_WS_CONNECTED: return chinese?"已连接到 Muse":"Connected to Muse";
+    case LED_STATE_WS_DISCONNECTED: return chinese?"正在重新连接":"Reconnecting";
+    case LED_STATE_UNPAIRED: return chinese?"需要配对":"Pairing required";
+    case LED_STATE_ERROR: return chinese?"连接错误":"Connection error";
+    case LED_STATE_WIFI_CONNECTING: return chinese?"正在连接 Wi-Fi":"Joining Wi-Fi";
+    default: return chinese?"正在连接":"Connecting";
     }
 }
 void notify() { if(renderer) xTaskNotifyGive(renderer); }
@@ -75,6 +79,7 @@ void save_settings() {
     if(nvs_open("muse_pocket",NVS_READWRITE,&h)!=ESP_OK) return;
     nvs_set_u8(h,"light",brightness); nvs_set_u8(h,"warmth",warmth);
     nvs_set_u8(h,"cadence",cadence); nvs_set_u8(h,"flip",flipped);
+    nvs_set_u8(h,"language",chinese?1:0);
     nvs_commit(h); nvs_close(h);
 }
 void light(int b, int warm) {
@@ -101,6 +106,7 @@ void light_init() {
         if(nvs_get_u8(h,"warmth",&value)==ESP_OK) warmth=std::min<int>(100,value);
         if(nvs_get_u8(h,"cadence",&value)==ESP_OK && (value==2||value==5||value==15||value==30)) cadence=value;
         if(nvs_get_u8(h,"flip",&value)==ESP_OK) flipped=value!=0;
+        if(nvs_get_u8(h,"language",&value)==ESP_OK && value<=1) chinese=value==1;
         nvs_close(h);
     }
     light(brightness,warmth);
@@ -134,31 +140,60 @@ void rect(int x,int y,int w,int h,uint8_t color) {
     int x0=std::max(0,x),y0=std::max(0,y),x1=std::min(W,x+w),y1=std::min(H,y+h);
     for(int row=y0;row<y1;++row) if(x1>x0) memset(canvas+row*W+x0,color,x1-x0);
 }
-void text(const char* str,int x,int y,int scale,int max_chars=80) {
-    for(int i=0;str[i]&&i<max_chars;++i) {
-        unsigned char ch=str[i]; if(ch<32||ch>126) ch='?';
-        const uint8_t* glyph=pixel_font[ch-32];
-        for(int gx=0;gx<5;++gx) for(int gy=0;gy<8;++gy)
-            if(glyph[gx]&(1<<gy)) rect(x+(i*6+gx)*scale,y+gy*scale,scale,scale,0);
+void text_span(const char* str,size_t length,int x,int y,int scale,int max_width) {
+    int offset=0;
+    for(size_t pos=0;pos<length && str[pos];) {
+        auto d=pocket_text::decode(str+pos,length-pos);
+        int advance=pocket_text::advance(d.codepoint)*scale;
+        if(offset+advance>max_width) break;
+        if(pocket_text::wide(d.codepoint)) {
+            const uint8_t* glyph=pocket_cjk_glyph(d.codepoint);
+            if(glyph) {
+                for(int gy=0;gy<16;++gy) for(int gx=0;gx<16;++gx)
+                    if(glyph[gy*2+gx/8]&(0x80>>(gx%8))) rect(x+offset+gx*scale,y+gy*scale,scale,scale,0);
+            } else { // A visible full-width box for CJK outside the bundled font.
+                rect(x+offset+scale,y+scale,14*scale,scale,0);
+                rect(x+offset+scale,y+14*scale,14*scale,scale,0);
+                rect(x+offset+scale,y+scale,scale,14*scale,0);
+                rect(x+offset+14*scale,y+scale,scale,14*scale,0);
+            }
+        } else if(advance) {
+            uint32_t cp=d.codepoint;
+            unsigned char ch=cp>=32 && cp<=126?static_cast<unsigned char>(cp):'?';
+            const uint8_t* glyph=pixel_font[ch-32];
+            for(int gx=0;gx<5;++gx) for(int gy=0;gy<8;++gy)
+                if(glyph[gx]&(1<<gy)) rect(x+offset+gx*scale,y+gy*scale,scale,scale,0);
+        }
+        offset+=advance;pos+=d.bytes;
     }
+}
+void text(const char* str,int x,int y,int scale) {
+    text_span(str,strlen(str),x,y,scale,W-x);
 }
 void centred(const char* str,int y,int max_scale) {
-    int len=strlen(str),scale=max_scale;
-    while(scale>2&&len*6*scale>W-32) --scale;
-    len=std::min(len,(W-32)/(6*scale));
-    text(str,(W-len*6*scale)/2,y,scale,len);
+    size_t length=strlen(str);int scale=max_scale;
+    // A title has 44 pixels before the character area; CJK is sixteen pixels high.
+    for(size_t pos=0;pos<length;) {
+        auto d=pocket_text::decode(str+pos,length-pos);
+        if(pocket_text::wide(d.codepoint)) scale=std::min(scale,2);
+        pos+=d.bytes;
+    }
+    while(scale>1 && pocket_text::width(str,length)*scale>W-32) --scale;
+    size_t visible=0;int pixels=0;
+    while(visible<length) {
+        auto d=pocket_text::decode(str+visible,length-visible);
+        int next=pocket_text::advance(d.codepoint)*scale;
+        if(pixels+next>W-32) break;
+        pixels+=next;visible+=d.bytes;
+    }
+    text_span(str,visible,(W-pixels)/2,y,scale,pixels);
 }
 void wrapped(const char* str,int y) {
-    // Four readable lines; preserve newlines and prefer word boundaries.
-    size_t pos=0,len=strlen(str);
-    for(int line=0;line<4&&pos<len;++line) {
-        size_t end=std::min(pos+35,len),newline=pos;
-        while(newline<end&&str[newline]!='\n') ++newline;
-        if(newline<end) end=newline;
-        else if(end<len) { size_t space=end; while(space>pos&&str[space]!=' ') --space; if(space>pos) end=space; }
-        char row[36]={}; memcpy(row,str+pos,end-pos); text(row,30,y+line*32,2);
-        pos=end; while(pos<len&&(str[pos]==' '||str[pos]=='\n')) ++pos;
-    }
+    // Four 32-pixel lines stay within the original caption area (625..752).
+    pocket_text::Line rows[4];
+    size_t count=pocket_text::wrap(str,strlen(str),(W-60)/2,rows,4);
+    for(size_t line=0;line<count;++line)
+        text_span(str+rows[line].begin,rows[line].end-rows[line].begin,30,y+line*32,2,W-60);
 }
 uint8_t luma(uint16_t rgb) {
     int r=((rgb>>11)&31)*255/31,g=((rgb>>5)&63)*255/63,b=(rgb&31)*255/31;
@@ -177,34 +212,35 @@ void compose() {
     char bat[20]; snprintf(bat,sizeof(bat),battery>=0?"%d%%":"--%%",battery);
     text("MUSE POCKET",24,20,2); text(bat,390,20,2);
     if(sleeping) {
-        centred("Sleeping",62,4); default_character();
-        centred("Press POWER to wake",650,2); return;
+        centred(chinese?"正在睡眠":"Sleeping",62,4); default_character();
+        centred(chinese?"按电源键唤醒":"Press POWER to wake",650,2); return;
     }
     if(menu) {
-        centred("Settings",65,4);
-        char rows[7][64];
-        snprintf(rows[0],64,"Brightness: %d%%",brightness);
-        snprintf(rows[1],64,"Warmth: %d%%",warmth);
-        snprintf(rows[2],64,"Refresh: every %ds",cadence);
-        snprintf(rows[3],64,"Orientation: %s",flipped?"flipped":"normal");
-        snprintf(rows[4],64,"Sleep");
-        snprintf(rows[5],64,"%s",recovery?"Return to CrossPoint":"CrossPoint not verified");
-        snprintf(rows[6],64,"Back to Muse");
-        for(int i=0;i<7;++i) {
-            if(i==selected) {rect(14,156+i*72,W-28,3,0);rect(14,210+i*72,W-28,3,0);text(">",22,172+i*72,3);}
-            text(rows[i],48,174+i*72,2);
+        centred(chinese?"设置":"Settings",65,4);
+        char rows[MENU_ROWS][64];
+        snprintf(rows[0],64,chinese?"亮度：%d%%":"Brightness: %d%%",brightness);
+        snprintf(rows[1],64,chinese?"暖光：%d%%":"Warmth: %d%%",warmth);
+        snprintf(rows[2],64,chinese?"刷新：每 %d 秒":"Refresh: every %ds",cadence);
+        snprintf(rows[3],64,chinese?"方向：%s":"Orientation: %s",flipped?(chinese?"翻转":"flipped"):(chinese?"正常":"normal"));
+        snprintf(rows[4],64,"%s",chinese?"语言：简体中文":"Language: English");
+        snprintf(rows[5],64,"%s",chinese?"睡眠":"Sleep");
+        snprintf(rows[6],64,"%s",recovery?(chinese?"返回 CrossPoint":"Return to CrossPoint"):(chinese?"恢复未验证":"CrossPoint not verified"));
+        snprintf(rows[7],64,"%s",chinese?"回到 Muse":"Back to Muse");
+        for(int i=0;i<MENU_ROWS;++i) {
+            if(i==selected) {rect(14,MENU_TOP+i*MENU_STEP,W-28,3,0);rect(14,MENU_TOP+54+i*MENU_STEP,W-28,3,0);text(">",22,MENU_TOP+16+i*MENU_STEP,3);}
+            text(rows[i],48,MENU_TOP+18+i*MENU_STEP,2);
         }
-        text("RIGHT: next  POWER: change",30,720,2);
-        text("Hold POWER on Return to restore",24,753,2);
+        centred(chinese?"右键：下一项  电源键：更改":"RIGHT: next  POWER: change",720,chinese?1:2);
+        centred(chinese?"长按电源键返回 CrossPoint":"Hold POWER on Return to restore",753,chinese?1:2);
         return;
     }
     centred(title,60,4);
     if(custom_avatar) memcpy(canvas+AVATAR_Y*W,avatar,AVATAR*W);
     else default_character();
     rect(24,603,W-48,2,0);
-    wrapped(status,625);
-    centred(connection(state),755,2);
-    text("RIGHT: settings",140,782,1);
+    wrapped(custom_status?status:(state==LED_STATE_WS_CONNECTED?(chinese?"已就绪，等待你的 Muse":"Ready for your Muse"):(chinese?"配对 Muse 后开始":"Pair with Muse to get started")),625);
+    centred(connection(state),755,chinese?1:2);
+    centred(chinese?"右键：设置":"RIGHT: settings",782,1);
 }
 void encode() {
     memset(frame,255,FRAME);
@@ -273,9 +309,10 @@ void activate() {
     case 1: warmth=(warmth+25)%125; light(brightness,warmth);save_settings();break;
     case 2: for(int i=0;i<4;++i) if(cadence==cadences[i]) {cadence=cadences[(i+1)%4];break;} save_settings();break;
     case 3: flipped=!flipped;force_full=true;save_settings();break;
-    case 4: xSemaphoreGive(lock_);sleep_now();return;
-    case 5: break; // Recovery requires a deliberate hold, never a tap.
-    case 6: menu=false;force_full=true;break;
+    case 4: chinese=!chinese;save_settings();break;
+    case 5: xSemaphoreGive(lock_);sleep_now();return;
+    case RECOVERY_ROW: break; // Recovery requires a deliberate hold, never a tap.
+    case 7: menu=false;force_full=true;break;
     }
     xSemaphoreGive(lock_);notify();
 }
@@ -288,13 +325,13 @@ void input_task(void*) {
         if(right&&!was_right) right_down=now;
         if(!right&&was_right&&now-right_down>=50000) {
             xSemaphoreTake(lock_,portMAX_DELAY);
-            if(!menu) {menu=true;selected=0;} else selected=(selected+1)%7;
+            if(!menu) {menu=true;selected=0;} else selected=(selected+1)%MENU_ROWS;
             xSemaphoreGive(lock_);notify();
         }
         if(power&&!was_power) {power_down=now;fired=false;}
         if(power&&!fired&&now-power_down>=3000000) {
             fired=true;
-            xSemaphoreTake(lock_,portMAX_DELAY);bool restore=menu&&selected==5&&recovery;xSemaphoreGive(lock_);
+            xSemaphoreTake(lock_,portMAX_DELAY);bool restore=menu&&selected==RECOVERY_ROW&&recovery;xSemaphoreGive(lock_);
             if(restore) pocket_return_to_crosspoint(); else sleep_now();
         }
         if(!power&&was_power&&!fired&&now-power_down>=50000) {
@@ -310,8 +347,8 @@ void input_task(void*) {
                 int x=point[0]|point[1]<<8,y=point[2]|point[3]<<8;
                 xSemaphoreTake(lock_,portMAX_DELAY);
                 if(flipped) {x=W-1-x;y=H-1-y;}
-                bool change=menu&&x>=0&&x<W&&y>=156&&y<660;
-                if(change) selected=std::clamp((y-156)/72,0,6);
+                bool change=menu&&x>=0&&x<W&&y>=MENU_TOP&&y<MENU_TOP+MENU_ROWS*MENU_STEP;
+                if(change) selected=std::clamp((y-MENU_TOP)/MENU_STEP,0,MENU_ROWS-1);
                 else if(y>=740) menu=!menu;
                 xSemaphoreGive(lock_);
                 if(change) activate();else notify();
@@ -371,17 +408,17 @@ extern "C" bool pocket_local_boot_ready(void) {
 extern "C" void led_status_set_state(led_state_t value) {
     if(!renderer)return;
     xSemaphoreTake(lock_,portMAX_DELAY);state=value;
-    if(value==LED_STATE_WS_CONNECTED&&!custom_status)
-        snprintf(status,sizeof(status),"Ready for your Muse");
     last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
 }
 extern "C" void led_status_set_title(const char* value) {
     if(!renderer)return;
-    xSemaphoreTake(lock_,portMAX_DELAY);snprintf(title,sizeof(title),"%s",value&&*value?value:"Muse Pocket");last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
+    const char* source=value&&*value?value:"Muse Pocket";
+    xSemaphoreTake(lock_,portMAX_DELAY);pocket_text::truncate(title,sizeof(title),source,strnlen(source,sizeof(title)+3));last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
 }
 extern "C" void pocket_set_status(const char* value) {
     if(!renderer)return;
-    xSemaphoreTake(lock_,portMAX_DELAY);custom_status=true;snprintf(status,sizeof(status),"%s",value?value:"");last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
+    const char* source=value?value:"";
+    xSemaphoreTake(lock_,portMAX_DELAY);custom_status=true;pocket_text::truncate(status,sizeof(status),source,strnlen(source,sizeof(status)+3));last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
 }
 extern "C" void pocket_set_frontlight(int value,int temperature) {
     if(!renderer)return;

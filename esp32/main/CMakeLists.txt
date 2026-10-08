@@ -73,7 +73,7 @@ set(GADGET_REQUIRES
 
 # E-paper has its own status screen in place of led_status.c.
 if(CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO)
-    list(APPEND GADGET_SRCS "pocket_status.cpp" "pocket_recovery.c" "pocket_token.c")
+    list(APPEND GADGET_SRCS "pocket_status.cpp" "pocket_text.cpp" "pocket_cjk_font.cpp" "pocket_recovery.c" "pocket_token.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
     list(APPEND GADGET_SRCS "epaper_status.c")
 else()

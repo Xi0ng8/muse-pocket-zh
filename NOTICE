@@ -30,3 +30,8 @@ secure hardware. Muse Pocket's X4 Pro profile does not enable secure boot.
 
 Muse service access and pairing are also subject to the Gadget SDK Terms:
 https://gadgets.muse.ai/sdk-terms
+
+Chinese fork additions: bounded UTF-8 layout, Chinese UI and embedded CJK glyphs.
+CJK bitmap data is derived from Noto Sans CJK SC, Copyright 2014-2021 Adobe,
+and distributed under SIL Open Font License 1.1, not Apache-2.0.
+See esp32/main/fonts/ for the original license and pinned source provenance.
