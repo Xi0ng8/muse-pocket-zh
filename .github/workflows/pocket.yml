@@ -23,9 +23,11 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python3 tools/check_public_tree.py
       - name: Focused tests
+        shell: bash
         run: |
-          python3 -m pip install 'cryptography==46.0.6'
-          python3 -m unittest discover -s esp32/tools/pocket -p 'test_*.py' -v
+          source "$IDF_PATH/export.sh"
+          python -m pip install 'cryptography==46.0.6'
+          python -m unittest discover -s esp32/tools/pocket -p 'test_*.py' -v
       - name: Embedded Chinese font checks
         run: python3 -m unittest discover -s tools/fonts -p 'test_*.py' -v
       - name: Build X4 Pro without credentials
