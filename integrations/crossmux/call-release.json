@@ -1,0 +1,38 @@
+{
+  "release": "v0.1.6-call-zh",
+  "status": "experimental-prerelease",
+  "device": "xteink_x4_pro",
+  "firmware_source_commit": "a50afa3668a5c98981c60a9bbb114f9b8f2c441b",
+  "images": {
+    "muse-pocket-zh-0.1.6-call-zh-uncredentialed.bin": {
+      "bytes": 2154176,
+      "sha256": "486474cf961653b062bfebcc84884ee2761dbeae05428ae5307046420f011576"
+    }
+  },
+  "required_peer": {
+    "release": "v0.1.5-coexist-zh",
+    "name": "crossmux-x4pro-coexist-1.6.5.bin",
+    "bytes": 6253120,
+    "sha256": "cb6ba7fd9c8b0c3db40eba7a6491d34f1108d77db890e1b634cf7be610e43a67",
+    "reflash_needed_for_existing_install": false
+  },
+  "verified": {
+    "pocket_host_tests": 19,
+    "sdk_ci_tests": 143,
+    "crossmux_patch_ci_tests": 10,
+    "ci": "https://github.com/Xi0ng8/muse-pocket-zh/actions/runs/37878058936",
+    "signed_peer_binding": true,
+    "private_full_sd_readback": true,
+    "new_muse_install": "user-confirmed",
+    "test_preset_call_and_result": "user-confirmed"
+  },
+  "not_verified": [
+    "all physical pagination cases",
+    "preset modification second call",
+    "physical timeout/disconnect",
+    "new-version two-way switching separately",
+    "USB recovery",
+    "power-loss recovery"
+  ],
+  "credentials": "Public template has an empty token slot. Package locally; never share private output."
+}

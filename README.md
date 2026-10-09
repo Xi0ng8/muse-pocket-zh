@@ -2,13 +2,13 @@
 
 基于 [Federico Viticci 的 Muse Pocket](https://github.com/viticci/muse-pocket)
 
-把 **阅星瞳 / Xteink X4 Pro** 变成 Muse 随身墨水屏，显示角色图、名字和活动状态。当前 **`v0.1.5-coexist-zh` 是实验预发布**：配套 CrossMux `1.6.5-x4pro-coexist`，让两个应用槽分别运行 CrossMux 阅读器和中文 Muse Pocket。
+把 **阅星瞳 / Xteink X4 Pro** 变成 Muse 随身墨水屏，显示角色图、名字和活动状态。当前 **`v0.1.6-call-zh` 是实验预发布**：配套 CrossMux `1.6.5-x4pro-coexist`，让两个应用槽分别运行 CrossMux 阅读器和中文 Muse Pocket。
 
 这是社区分支，不是 Xteink、Meta 或原作者的官方版本。原 `v0.1.4-zh` 仍用于 CrossPoint 1.6.5 X4 Pro 环境；两个版本的安装与恢复目标不同，不要混用。
 
-源码正在开发 **`0.1.6-call-zh` 实验功能：左键呼叫 Muse**，暂无该版本公开 release，尚待实机验证。长按左键 2 秒触发已配对 Muse 读取用户保存的「X4 Pro 左键预设」；在已配对的设置菜单中触发会先关闭菜单。真实结果通过匹配 `call_id` 的完成命令返回，并在黑白屏分页显示。只有初始化设置尚未完成、且没有等待配对确认时，才保留左键长按 5 秒重置设置；日常使用不清配对，配对确认中长按不确认也不呼叫。设置模板、按键与超时风险见 [左键呼叫指南](docs/call-muse.md)。HTTP 接受请求不等于任务完成，超时显示状态未知且不自动重发；按键不会猜测最近聊天里的任务。
+**`0.1.6-call-zh` 新功能：左键呼叫 Muse**。用户已在一台国内版 X4 Pro 上确认安装、测试预设呼叫与结果回传正常。长按左键 2 秒触发已配对 Muse 读取用户保存的「X4 Pro 左键预设」；在已配对的设置菜单中触发会先关闭菜单。真实结果通过匹配 `call_id` 的完成命令返回，并在黑白屏分页显示。只有初始化设置尚未完成、且没有等待配对确认时，才保留左键长按 5 秒重置设置；日常使用不清配对，配对确认中长按不确认也不呼叫。设置模板、按键与超时风险见 [左键呼叫指南](docs/call-muse.md)。HTTP 接受请求不等于任务完成，超时显示状态未知且不自动重发；按键不会猜测最近聊天里的任务。
 
-这个开发版本沿用既有受保护 CrossMux `1.6.5-x4pro-coexist`，升级只需要新的配套签署 Muse 模板和本机个人打包，无需重刷 CrossMux。下面发布链接仍指向已发布的 `0.1.5-coexist-zh`；其版本、文件和摘要没有变更。新功能不表示已经替用户在 Muse 中保存预设。
+本版本沿用既有受保护 CrossMux `1.6.5-x4pro-coexist`，升级只需要新的配套签署 Muse 模板和本机个人打包，无需重刷 CrossMux。新 Muse 模板见 [0.1.6 发布页](https://github.com/Xi0ng8/muse-pocket-zh/releases/tag/v0.1.6-call-zh)；首次安装仍先按双系统指南使用 0.1.5 发布页的配套 CrossMux。旧版资产与摘要不变。新功能不表示已经替用户在 Muse 中保存预设。
 
 ## 刷机风险（安装前必读）
 
@@ -47,7 +47,7 @@
 
 按 [双系统逐步安装指南](docs/crossmux-coexistence.md#安装步骤) 操作：先在本机给已签署的公开 Muse 模板加入自己的 token；阶段 A 从原 CrossPoint 更新专用 CrossMux，确认启动；阶段 B 从 CrossMux 更新配套个人 Muse 镜像。每次上传后完整下载回读，核对大小与 SHA256，再进行设备上的 SD 更新。
 
-发布文件与摘要以 [本版本发布页](https://github.com/Xi0ng8/muse-pocket-zh/releases/tag/v0.1.5-coexist-zh) 的清单为准，不能根据文件名推断是否配套。第一次使用 Muse 时启用手机 App 的 Developer mode，通过 Add gadget 配对并按阅读器左键确认。已配对设备先检查连接，排查时不要先重置配对。
+发布文件与摘要以 [双系统首次迁移发布页](https://github.com/Xi0ng8/muse-pocket-zh/releases/tag/v0.1.5-coexist-zh) 的清单为准，不能根据文件名推断是否配套。第一次使用 Muse 时启用手机 App 的 Developer mode，通过 Add gadget 配对并按阅读器左键确认。已配对设备先检查连接，排查时不要先重置配对。
 
 **个人打包镜像包含你的 token，不能上传 GitHub、分享给别人或附到问题报告。** 发布固件始终不包含 token，每个人必须本机打包自己的副本。
 
@@ -64,6 +64,12 @@
 CrossMux：**设置 → 系统 → 切换到中文 Muse**。Muse：右键打开设置，用右键选中 **切换到 CrossMux**，长按电源 **3 秒**。
 
 日常升级必须使用重新配套、签署的镜像。CrossMux 的普通 OTA 已禁用，SD 更新也只接受配套签署的 Muse；包括开机 DOWN 进入的 SD 恢复模式，**它也不能加载普通 CrossMux 文件来修复 CrossMux 自身**。两槽损坏时需要核实 USB 恢复条件与实际分区，不能假定自动回滚。操作前阅读 [恢复指南](docs/crossmux-recovery.md)。
+
+## 一颗按键可以做什么
+
+先用「呼叫成功，中文正常」测试预设，再在 Muse 里改成你需要的任务：今天的重要事项、待办摘要、笔记阅读卡片、学习抽问，或一个明确授权的工作流程。阅读器负责触发和显示，实际能力取决于 Muse 的工具、数据和权限。
+
+这个版本是抛砖引玉。欢迎在 [Issues](https://github.com/Xi0ng8/muse-pocket-zh/issues) 分享预设模板、玩法和脱敏的屏幕示例，也欢迎提交改进。可参考 [玩法示例](docs/call-muse.md#玩法示例)，请说明需要哪些数据与授权，不分享 token 或个人固件。
 
 ## 许可证与贡献
 

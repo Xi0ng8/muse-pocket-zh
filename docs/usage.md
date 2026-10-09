@@ -2,7 +2,7 @@
 
 Muse Pocket 是 Muse 的随身显示屏，接收配对连接发送的角色图与状态，不提供公开网页 API，也不会独立订阅活动流。
 
-下述呼叫与分页行为属于源码开发中的 **`0.1.6-call-zh` 实验版本**，暂无公开 release，尚待实机验证。已发布 `0.1.5-coexist-zh` 不包含这些新操作；其资产与摘要不变。配置预设和故障边界见 [左键呼叫指南](call-muse.md)。
+下述呼叫与分页行为属于 **`0.1.6-call-zh` 实验版本**。用户已确认测试预设的呼叫与回传；分页等完整验收范围见 [验证记录](call-muse.md#升级边界与验证)。已发布 `0.1.5-coexist-zh` 不包含这些新操作；其资产与摘要不变。配置预设和故障边界见 [左键呼叫指南](call-muse.md)。
 
 ## 按键
 
@@ -26,7 +26,7 @@ CrossMux 中的入口是 **设置 → 系统 → 切换到中文 Muse**。安装
 | --- | --- | --- |
 | `display.draw_url` | `url`，可选 `row` | 显示角色图，保留状态 |
 | `pocket.set_status` | `text`，最多 240 UTF-8 字节 | 修改角色图下方状态 |
-| `pocket.complete_call`（0.1.6 开发功能） | 当前 `call_id`；`text` 为 1–3072 UTF-8 字节 | 完成匹配呼叫，在角色图区域分页显示结果 |
+| `pocket.complete_call`（0.1.6 新功能） | 当前 `call_id`；`text` 为 1–3072 UTF-8 字节 | 完成匹配呼叫，在角色图区域分页显示结果 |
 | `pocket.set_frontlight` | `brightness`、`warmth`，0–100 | 修改并保存前光 |
 | `display.show_animation` | 无 | 返回中性占位图 |
 
