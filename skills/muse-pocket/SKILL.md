@@ -53,8 +53,10 @@ activity subscription. Do not reset pairing as a first response to a UI problem.
 
 ## Experimental left-button call
 
-Read `docs/call-muse.md` before working on `0.1.6-call-zh`. This is source under
-development, not a published or hardware-verified release. Preserve the existing
+Read `docs/call-muse.md` before working on `0.1.6-call-zh`. It is an experimental
+prerelease; one user confirmed installation, a test preset call and its result.
+Other physical scenarios remain unverified; consult the release verification
+record rather than assuming full hardware coverage. Preserve the existing
 protected CrossMux 1.6.5 peer; upgrade only a newly paired signed Muse template
 with local private packaging. Do not rewrite the 0.1.5 release or its hashes.
 
