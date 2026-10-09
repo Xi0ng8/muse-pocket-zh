@@ -1,6 +1,6 @@
 ---
 name: muse-pocket
-description: Build, maintain or troubleshoot Muse Pocket companion firmware on an Xteink X4 Pro, including private token packaging, paired character/status commands and CrossPoint SD updates.
+description: Build, maintain or troubleshoot Muse Pocket on an Xteink X4 Pro, including private packaging, protected CrossMux coexistence, character/status commands and experimental left-button Muse calls.
 ---
 
 # Muse Pocket
@@ -50,3 +50,37 @@ format. Use `display.draw_url` for a 480×480 baseline JPEG and `pocket.set_stat
 for short Chinese or ASCII text; a previous image must survive a failed download. The startup
 chat request asks Muse to keep the status current, but it is not an independent
 activity subscription. Do not reset pairing as a first response to a UI problem.
+
+## Experimental left-button call
+
+Read `docs/call-muse.md` before working on `0.1.6-call-zh`. This is source under
+development, not a published or hardware-verified release. Preserve the existing
+protected CrossMux 1.6.5 peer; upgrade only a newly paired signed Muse template
+with local private packaging. Do not rewrite the 0.1.5 release or its hashes.
+
+The paired device's 2-second left hold sends a fixed trigger with fresh
+`call_id` and `device_id`; it does not guess a recent task. Triggering from a
+paired settings menu closes that menu. Preserve a 5-second setup reset only
+while initial setup is incomplete and no pairing confirmation is pending;
+daily paired use must not clear pairing. During pairing confirmation a hold
+must neither confirm nor call; confirmation requires a short press. Unpaired
+devices must not call. Busy repeats must not resend. HTTP 2xx is acceptance, not task
+completion. Only `pocket.complete_call(call_id,text)` with the exact pending ID
+and 1–3072 UTF-8 bytes completes the call. Ordinary `pocket.set_status` must not
+override the calling screen. Results page through the avatar area, preserving
+the avatar; a short left press advances and returns to the avatar after the last
+page. Preserve right/settings, power/sleep and recovery controls.
+
+After three minutes without a matched result, show unknown status without an
+automatic retry. Disconnect, sleep or leaving a local page does not cancel an
+already sent Muse task. Check the Muse task before retrying; side effects remain
+under Muse's original user authorization and confirmation requirements.
+
+Help the user save a named “X4 Pro 左键预设” through their Muse chat as persistent
+Memory, then read it back and dry-run it in a new message. Use the concrete
+template in `docs/call-muse.md`, including exact callback context and a read-only
+summary example. Missing, forgotten or ambiguous presets must return a setup
+hint; never execute a guessed recent request. Do not invent a preset API, cloud
+scheduler, phone menu or Memory path. This repository skill is maintenance
+guidance, not proof that it is installed in the user's Muse or that their preset
+has been saved. Distinguish source tests from cloud setup and physical validation.

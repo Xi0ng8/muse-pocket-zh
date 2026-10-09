@@ -58,6 +58,7 @@
 #include "led_status.h"
 #if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
 #include "pocket.h"
+#include "pocket_call.h"
 #endif
 #include "button.h"
 #include "tunnel_netif.h"
@@ -1843,6 +1844,18 @@ static cJSON *on_ws_command(
         cJSON_AddBoolToObject(result,"ok",true);
         return result;
     }
+    if (strcmp(command, "pocket.complete_call") == 0) {
+        cJSON* call_id = cJSON_GetObjectItem(params, "call_id");
+        cJSON* text = cJSON_GetObjectItem(params, "text");
+        if (!cJSON_IsString(call_id) || !call_id->valuestring || strnlen(call_id->valuestring, 37) != 36 ||
+            !cJSON_IsString(text) || !text->valuestring || !text->valuestring[0] || strnlen(text->valuestring, 3073) > 3072)
+            return command_error("invalid_params", "call_id must be a UUID and text must contain 1..3072 UTF-8 bytes");
+        if (!pocket_call_complete(call_id->valuestring, text->valuestring))
+            return command_error("invalid_completion", "completion is malformed, expired, or does not match the active call");
+        cJSON* result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result,"ok",true);
+        return result;
+    }
     if (strcmp(command, "pocket.set_frontlight") == 0) {
         cJSON* brightness=cJSON_GetObjectItem(params,"brightness");
         cJSON* warmth=cJSON_GetObjectItem(params,"warmth");
@@ -2140,15 +2153,36 @@ static void on_button_short_press(void) {
         return;
     }
 
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+    if (!pocket_call_active()) pocket_result_next();
+#else
     ESP_LOGI(TAG, "button short-press ignored; setup already complete");
+#endif
 }
 
 static void on_button_double_press(void) {
     ESP_LOGI(TAG, "button double-press ignored");
 }
 
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+static uint32_t pocket_button_hold_threshold(void) {
+    return config_setup_complete() && !link_pairing_confirmation_required() ? 2000 : 5000;
+}
+#endif
+
 static void on_button_long_press(void) {
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+    if (link_pairing_confirmation_required()) return;
+    if (config_setup_complete()) {
+        pocket_call_start();
+    } else if (button_long_press_duration_ms() >= 5000) {
+        // Actual held time prevents a configuration change from turning a
+        // previously armed 2-second call into a destructive early reset.
+        reset_setup_from_control("initial setup button long-press");
+    }
+#else
     reset_setup_from_control("button long-press");
+#endif
 }
 
 
@@ -2503,6 +2537,9 @@ void app_run(void) {
         abort();
     }
 
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+    pocket_call_init();
+#endif
     config_store_init();
     wifi_known_init();
 
@@ -2643,6 +2680,9 @@ void app_run(void) {
     (void)on_button_double_press;
     (void)on_button_long_press;
 #else
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+    button_set_long_press_threshold_cb(pocket_button_hold_threshold);
+#endif
     if (!button_init(on_button_short_press, on_button_double_press,
                      on_button_long_press)) {
         ESP_LOGW(TAG, "button init failed — physical setup reset unavailable");

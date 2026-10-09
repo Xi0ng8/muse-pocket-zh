@@ -87,6 +87,8 @@ void noise_ctrl_disconnect(void);
 bool noise_ctrl_reconnect(const char *network_ssid);
 
 bool noise_ctrl_is_connected(void);
+// Immutable local node identity initialized before the session starts.
+const char *noise_ctrl_device_id(void);
 
 // From noise_ctrl_connect() until noise_ctrl_disconnect(), connected or not:
 // the session reconnects by itself meanwhile.
@@ -96,7 +98,7 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
-// ---- Extra daemon requests on this session (Muse builds only) ----
+// ---- Extra daemon requests on this session (Muse and X4 Pro builds) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this
 // session. A refused or reset request never affects the control session.

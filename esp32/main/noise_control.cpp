@@ -66,6 +66,7 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define IDENTITY_STREAM_ID 3
 #if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
 #define POCKET_INTRO_STREAM_ID 4
+static_assert(POCKET_INTRO_STREAM_ID < 16, "intro must not overlap queued requests");
 // Once per boot/paired Muse; reconnects retain the display and do not post again.
 static char s_pocket_intro_vm[128] = {};
 #endif
@@ -894,8 +895,8 @@ static bool tunnel_send_body(void *vctx, const uint8_t *data, size_t len) {
 
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
-// Only Muse opens these; Link-only gateways get the empty stubs below.
-#if CONFIG_MUSE_ENABLED
+// Muse and X4 Pro share bounded daemon request streams.
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
 
 // Stream ids from here up belong to these requests; lower ids are Link's own.
 #define REQ_STREAM_BASE 16
@@ -1419,6 +1420,10 @@ static char *build_register_json(void) {
     cJSON* status_required=cJSON_CreateObject();
     cJSON_AddItemToObject(status_required,"text",string_param("Current activity or status, up to 240 UTF-8 bytes. Chinese and ASCII text are supported; emoji and unsupported characters use a replacement glyph. Keep text short to fit four lines."));
     add_command(commands,"pocket.set_status","Update the caption below the character. The character remains visible. Send meaningful updates; the device batches screen refreshes.",status_required,nullptr);
+    cJSON* call_required=cJSON_CreateObject();
+    cJSON_AddItemToObject(call_required,"call_id",string_param("Exact UUID supplied by the current X4 Pro preset call; never reuse a previous call ID."));
+    cJSON_AddItemToObject(call_required,"text",string_param("Final result or explicit failure: 1..3072 UTF-8 bytes, short black-and-white-screen paragraphs, no emoji."));
+    add_command(commands,"pocket.complete_call","Complete only the matching active X4 Pro preset call. HTTP chat acceptance and ordinary status updates do not complete it.",call_required,nullptr);
     cJSON* light_required=cJSON_CreateObject();
     for(const char* key : {"brightness", "warmth"}) {
         cJSON* p=cJSON_CreateObject();
@@ -2212,8 +2217,8 @@ static session_result_t run_session(stack_monitor_t *stack) {
             }
         }
 
-#if CONFIG_MUSE_ENABLED
-        {
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+        if (s_register_acked) {
             bool sent = false;
             if (!req_pump_tx(tls, session, svc_scratch, env_scratch, ws_buf, &sent)) {
                 error = true;
@@ -2457,7 +2462,7 @@ extern "C" void noise_ctrl_send_command_result(
     queue_result(session_generation, request_id, result);
 }
 
-#if CONFIG_MUSE_ENABLED
+#if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
@@ -2518,6 +2523,12 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 extern "C" void noise_ctrl_req_cancel(int64_t id) {
     if (!s_req_q || id < REQ_STREAM_BASE) return;
     req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr};
+#if CONFIG_HOMEHUB_LED_BACKEND_XTEINK_X4_PRO
+    req_put(op, 0); // Button and UI tasks never wait for a backed-up session queue.
+#else
     req_put(op, pdMS_TO_TICKS(100));
+#endif
 }
 #endif  // CONFIG_MUSE_ENABLED
+
+extern "C" const char *noise_ctrl_device_id(void) { return s_node_id[0] ? s_node_id : nullptr; }

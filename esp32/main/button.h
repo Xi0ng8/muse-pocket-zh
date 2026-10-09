@@ -17,8 +17,15 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef void (*button_cb)(void);
+// X4 Pro samples this only on press-down: 2000ms calls Muse after setup,
+// otherwise 5000ms retains the setup reset gesture. Set before button_init.
+typedef uint32_t (*button_long_press_threshold_cb)(void);
+void button_set_long_press_threshold_cb(button_long_press_threshold_cb cb);
+// Elapsed duration of the most recent long event, available inside its callback.
+uint32_t button_long_press_duration_ms(void);
 
 bool button_init(button_cb on_short_press, button_cb on_double_press,
                  button_cb on_long_press);

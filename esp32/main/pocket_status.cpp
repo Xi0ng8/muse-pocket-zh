@@ -3,6 +3,7 @@
 #include "pocket.h"
 #include "pocket_text.h"
 #include "pocket_cjk_font.h"
+#include "pocket_call.h"
 #include "BoardConfig.h"
 #include "XteinkDetect.h"
 #include "driver/Ssd1677Driver.h"
@@ -43,6 +44,11 @@ int64_t last_status_us=0, last_draw_us=0;
 uint32_t requested_frame=0, finished_frame=0;
 led_state_t state=LED_STATE_BOOT;
 char title[64]="Muse Pocket", status[241]={};
+constexpr int RESULT_LINES=12, RESULT_WIDTH=216;
+char call_caption[241]={}, result_text[3073]={};
+size_t result_length=0, result_offset=0;
+int result_index=0, result_total=0;
+bool result_visible=false;
 i2c_master_bus_handle_t i2c_bus;
 i2c_master_dev_handle_t touch, gauge;
 const int cadences[]={2,5,15,30};
@@ -195,6 +201,36 @@ void wrapped(const char* str,int y) {
     for(size_t line=0;line<count;++line)
         text_span(str+rows[line].begin,rows[line].end-rows[line].begin,30,y+line*32,2,W-60);
 }
+size_t result_page(const char* str,size_t length,size_t offset,pocket_text::Line* rows,size_t* next) {
+    size_t count=pocket_text::wrap(str+offset,length-offset,RESULT_WIDTH,rows,RESULT_LINES);
+    size_t pos=count?offset+rows[count-1].end:length;
+    while(pos<length && (str[pos]==' ' || str[pos]=='\r')) ++pos;
+    if(pos<length && str[pos]=='\n') ++pos;
+    *next=pos;
+    return count;
+}
+int result_page_count(const char* str,size_t length) {
+    int pages=0;
+    for(size_t pos=0;pos<length;) {
+        pocket_text::Line rows[RESULT_LINES];size_t next=0;
+        result_page(str,length,pos,rows,&next);
+        ++pages;
+        if(next<=pos) break;
+        pos=next;
+    }
+    return pages;
+}
+void draw_result() {
+    pocket_text::Line rows[RESULT_LINES];size_t next=0;
+    size_t count=result_page(result_text,result_length,result_offset,rows,&next);
+    for(size_t line=0;line<count;++line)
+        text_span(result_text+result_offset+rows[line].begin,rows[line].end-rows[line].begin,
+                  24,AVATAR_Y+12+line*36,2,W-48);
+    char footer[96];
+    snprintf(footer,sizeof(footer),chinese?"%d/%d 页  左键：%s":"%d/%d  LEFT: %s",
+             result_index+1,result_total,next<result_length?(chinese?"下一页":"next"):(chinese?"回到角色":"avatar"));
+    centred(footer,AVATAR_Y+456,1);
+}
 uint8_t luma(uint16_t rgb) {
     int r=((rgb>>11)&31)*255/31,g=((rgb>>5)&63)*255/63,b=(rgb&31)*255/31;
     return (r*77+g*150+b*29)>>8;
@@ -235,16 +271,18 @@ void compose() {
             text(rows[i],48,MENU_TOP+18+i*MENU_STEP,2);
         }
         centred(chinese?"右键：下一项  电源键：更改":"RIGHT: next  POWER: change",720,chinese?1:2);
-        centred(chinese?"长按电源键返回 CrossPoint":"Hold POWER on Return to restore",753,chinese?1:2);
+        centred(mux?(chinese?"长按电源键切换到 CrossMux":"Hold POWER to switch to CrossMux"):
+                    (chinese?"长按电源键返回 CrossPoint":"Hold POWER on Return to restore"),753,chinese?1:2);
         return;
     }
     centred(title,60,4);
-    if(custom_avatar) memcpy(canvas+AVATAR_Y*W,avatar,AVATAR*W);
+    if(result_visible) draw_result();
+    else if(custom_avatar) memcpy(canvas+AVATAR_Y*W,avatar,AVATAR*W);
     else default_character();
     rect(24,603,W-48,2,0);
-    wrapped(custom_status?status:(state==LED_STATE_WS_CONNECTED?(chinese?"已就绪，等待你的 Muse":"Ready for your Muse"):(chinese?"配对 Muse 后开始":"Pair with Muse to get started")),625);
+    wrapped(call_caption[0]?call_caption:(custom_status?status:(state==LED_STATE_WS_CONNECTED?(chinese?"已就绪，等待你的 Muse":"Ready for your Muse"):(chinese?"配对 Muse 后开始":"Pair with Muse to get started"))),625);
     centred(connection(state),755,chinese?1:2);
-    centred(chinese?"右键：设置":"RIGHT: settings",782,1);
+    centred(chinese?"左键长按：呼叫 Muse  右键：设置":"Hold LEFT: call Muse  RIGHT: settings",782,1);
 }
 void encode() {
     memset(frame,255,FRAME);
@@ -324,6 +362,9 @@ void input_task(void*) {
     bool was_right=false,was_power=false,fired=false,touched=false;
     int64_t right_down=0,power_down=0,last_battery=0;
     for(;;) {
+        // Call timeout work owns its own mutex and may update this UI. Never
+        // invoke it while holding the panel-state mutex.
+        pocket_call_tick();
         int64_t now=esp_timer_get_time();
         bool right=digitalRead(7)==LOW,power=digitalRead(3)==LOW;
         if(right&&!was_right) right_down=now;
@@ -423,6 +464,40 @@ extern "C" void pocket_set_status(const char* value) {
     if(!renderer)return;
     const char* source=value?value:"";
     xSemaphoreTake(lock_,portMAX_DELAY);custom_status=true;pocket_text::truncate(status,sizeof(status),source,strnlen(source,sizeof(status)+3));last_status_us=esp_timer_get_time();xSemaphoreGive(lock_);notify();
+}
+extern "C" void pocket_set_call_state(const char* value) {
+    if(!renderer)return;
+    const char* source=value?value:"";
+    xSemaphoreTake(lock_,portMAX_DELAY);
+    pocket_text::truncate(call_caption,sizeof(call_caption),source,strnlen(source,sizeof(call_caption)+3));
+    menu=false;result_visible=false;force_full=true;
+    last_status_us=esp_timer_get_time();
+    xSemaphoreGive(lock_);notify();
+}
+extern "C" void pocket_show_call_result(const char* value) {
+    if(!renderer)return;
+    const char* source=value?value:"";
+    xSemaphoreTake(lock_,portMAX_DELAY);
+    result_length=pocket_text::truncate(result_text,sizeof(result_text),source,strnlen(source,sizeof(result_text)+3));
+    result_offset=0;result_index=0;result_total=result_page_count(result_text,result_length);
+    result_visible=result_length>0;menu=false;force_full=true;
+    const char* caption=chinese?"Muse 已返回结果":"Muse returned a result";
+    pocket_text::truncate(call_caption,sizeof(call_caption),caption,strlen(caption));
+    last_status_us=esp_timer_get_time();
+    xSemaphoreGive(lock_);notify();
+}
+extern "C" bool pocket_result_next(void) {
+    if(!renderer)return false;
+    xSemaphoreTake(lock_,portMAX_DELAY);
+    if(!result_visible && !call_caption[0]) {xSemaphoreGive(lock_);return false;}
+    if(result_visible) {
+        pocket_text::Line rows[RESULT_LINES];size_t next=0;
+        result_page(result_text,result_length,result_offset,rows,&next);
+        if(next<result_length) {result_offset=next;++result_index;}
+        else {result_visible=false;call_caption[0]=0;}
+    } else call_caption[0]=0;
+    menu=false;force_full=true;last_status_us=esp_timer_get_time();
+    xSemaphoreGive(lock_);notify();return true;
 }
 extern "C" void pocket_set_frontlight(int value,int temperature) {
     if(!renderer)return;
